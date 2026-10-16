@@ -44,8 +44,7 @@ Options we use:
 | `includePartialMessages` | Streams text and thinking as they are generated. |
 | `setModel`, `setMcpServers`, `interrupt` | Live controls on a running session. |
 | `applyFlagSettings` | Changes the effort level on a running session. |
-| `initializationResult()`, `accountInfo()` | Claude Code version, account type and model list, without a model call. |
-| `supportedModels()` | Lists models with context size and supported effort levels. |
+| `initializationResult()` | Claude Code version, account type and model list (with supported effort levels), without a model call. Models carry no context size. |
 | `verbatimPrompts` | Turns off Claude Code's slash commands, `@file` expansion and turn-start notes. |
 | `settingSources`, `strictMcpConfig`, `skills` | Control what Claude Code loads from `~/.claude` and the project. |
 | `env` | Environment for the child process. It replaces the parent environment rather than merging with it. |
@@ -70,7 +69,7 @@ Claude thinks and opencode acts. Claude Code's built-in tools are off, and openc
 
 ### How the plugin plugs into opencode
 
-1. **Register a "Claude Code" provider and its models** with `ctx.provider.transform` (`packages/plugin/src/effect/provider.ts`). Each model's package points at a placeholder file inside the plugin (see "Provider loading"). Models are registered right away from the last saved model list, or a built-in list on first run. The login check and `supportedModels()` run in the background and update the list with `ctx.provider.reload()`, so opencode never waits on them at startup.
+1. **Register a "Claude Code" provider and its models** with `ctx.provider.transform` (`packages/plugin/src/effect/provider.ts`). Each model's package points at a placeholder file inside the plugin (see "Provider loading"). Models are registered right away from the last saved model list, or a built-in list on first run. The login check runs in the background and update the list with `ctx.provider.reload()`, so opencode never waits on them at startup.
 2. **Show up as connected** in opencode's provider list. `ctx.integration.transform` adds an `external` login method, "Claude Code login (`claude auth login`)", the same way Google Vertex offers gcloud login (`packages/core/src/plugin/provider/google-vertex.ts:116-130`). opencode stores only which method was chosen, never a token (`packages/core/src/integration.ts:766-790`).
 3. **Supply our own model** through the `aisdk` `sdk` hook (`packages/plugin/src/effect/aisdk.ts`), the way GitHub Copilot does (`packages/core/src/plugin/provider/github-copilot.ts:264-276`). We return an AI SDK `LanguageModelV3` whose `doStream` drives the Claude SDK instead of making an HTTP call. opencode converts its events into its own (`streamPartEvents` in `packages/core/src/aisdk.ts`).
 4. **Know which session a call belongs to, and what kind of call it is.** opencode sends an `x-opencode-session-id` header with every model call, including titles, compaction and generate (`packages/core/src/session/model-request.ts:279-320`), and the bridge passes headers through to `doStream` (`aisdk.ts:492-513`). Our `ctx.session.hook("model.request")`, limited to our provider, adds the call's kind (main, compaction, title or generate) as another header.
@@ -117,7 +116,8 @@ In-process MCP servers have no timeout by default (`sdk.d.ts:622-660`), so a han
 - **Process lifetime.** One `claude` process per active opencode session. It is stopped after an idle period and resumed with `resume` when needed. Processes live in one registry for the whole opencode process, not inside a single plugin setup, so a plugin reload doesn't kill running sessions: the old setup keeps them for about 10 seconds so the new one can take them over. A session's process is replaced one at a time, so a restart waits for the previous one to finish. After compaction the old process is never reused.
 - **Stopping a process.** Always in this order: `interrupt()`, then read the remaining messages until Claude Code has finished writing its session file, then close. Closing first, or failing waiting tool handlers first, can make Claude start another model call or leave its session file on the wrong branch.
 - **Finding `claude`.** The plugin passes the user's installed binary in `pathToClaudeCodeExecutable` and doesn't install the SDK's bundled copy. On Windows it uses `claude.exe`, not the `.cmd` wrapper.
-- **Login check.** Before offering the models, check that `claude` is installed and logged in, without using any tokens. Start a session whose input never sends a message, call `initializationResult()` and `accountInfo()`, then close it. It takes about a second and returns the Claude Code version, the subscription type and the model list.
+- **Login check.** Before offering the models, check that `claude` is installed and logged in, without using any tokens. Start a session whose input never sends a message, call `initializationResult()`, then close it. It takes under a second, writes no session file, and returns the Claude Code version, the account and the model list. A logged-out `claude` still starts and reports an account with no subscription. The check runs when the plugin starts and again each time the user connects the login method, because opencode keeps a problem per connection (a new connection starts with none) and the user may have just run `claude auth login`. Checks run one at a time and look up the executable each time, so connecting after installing or signing in can recover without a plugin reload.
+- **Version check.** The reported version must be at least 2.1.248, which added `verbatimPrompts`; older binaries silently ignore it. Binaries that report an older version, or omit their version, get a message to run `claude update`. This is a minimum feature check; the tested versions are listed in Background.
 - **Usage.** Each step reports the token counts of its own Claude call. Claude Code can report the same API call more than once while it streams, so the plugin keeps the largest count per API message ID instead of adding them up. Adding them up would make opencode think the context is bigger than it is and compact too early. Cost is covered by the subscription, so the models have an empty cost list and Claude's `total_cost_usd` (a list-price estimate) isn't shown.
 - **Empty success.** After a server error, Claude Code can report a successful result with no output. The plugin checks `api_error_status` on the result (`sdk.d.ts:5911`) and reports an error instead.
 - **Retries.** Claude Code retries failed API calls itself (10 times by default, set with the documented `CLAUDE_CODE_MAX_RETRIES`). Our `ctx.session.hook("retry")`, limited to our provider, stops opencode from retrying the same errors again.
@@ -228,6 +228,7 @@ Notes:
 - opencode reads AGENTS.md but not CLAUDE.md, so Claude Code sessions use AGENTS.md like every other model.
 - Claude Code always adds three things no setting removes: a one-line SDK introduction before our system prompt, an environment block (folder, OS, model and date), and a reminder holding the user's account email. They are small, and the environment block overlaps with opencode's `<env>` block.
 - `--bare` / `CLAUDE_CODE_SIMPLE` must stay off. It skips OAuth, so the subscription wouldn't work.
+- Claude Code's start-up reply still lists the user's own skills and commands from `~/.claude`, but with these settings the model doesn't see them (checked live against CC 2.1.301).
 
 ### Things that need translating
 
@@ -237,10 +238,11 @@ Notes:
 - **Tool descriptions.** Claude Code cuts tool descriptions at 2048 characters. opencode's subagent tool ends its long description with the list of available agents, so the plugin moves that list to the front, where it survives the cut.
 - **System prompt changes.** Claude Code records the system prompt when the process starts and ignores later changes (`sdk.d.ts:2448`). The plugin compares the system prompt on each call and restarts with `resume` if it changed. Most mid-session updates already arrive as `<system-update>` user messages (`aisdk.ts:540-557`), which pass through.
 - **Reminders and other mid-session messages.** Plan-mode notes, folder changes and "continue" nudges are ordinary user messages, so they pass through. Messages the user sends while tools are running arrive after the tool results. They go to Claude alongside the results, using the SDK user message `priority` field.
-- **Effort levels.** Each effort level is an opencode model variant, built from `supportedModels()`. It reaches our model in the request's provider options and is changed live with `applyFlagSettings`.
+- **Effort levels.** Each effort level is an opencode model variant, built from the login check's model list. It reaches our model in the request's provider options and is changed live with `applyFlagSettings`.
 - **Max output tokens.** Set through `CLAUDE_CODE_MAX_OUTPUT_TOKENS` when the process starts. A change restarts the process with `resume`.
 - **Max steps.** When an agent hits its step limit, opencode sets `toolChoice: "none"`, which Claude Code can't express. The plugin removes our tools for that call with `setMcpServers`.
-- **Context size.** Taken from `supportedModels()`, so opencode compacts at the right time.
+- **Context size.** Claude Code's model list has no context size; it is only reported after a call (`modelUsage`). The models keep opencode's default of 200k tokens, which is Claude Code's window for every model on the list (checked live against CC 2.1.301 on a Team plan). A plan that lists 1M-context models (`[1m]`) would compact earlier than needed, which is safe.
+- **Title model.** opencode picks a cheaper model for titles by family name (`Model.small` in `packages/core/src/model.ts`), so Haiku models get the `claude-haiku` family.
 - **Plan limit reached.** Claude reports `rate_limit` errors and rate-limit events with a reset time (`sdk.d.ts:3751`, `5756-5792`). The plugin shows a clear message with the reset time and suggests switching models. A rate-limit event marked "rejected" isn't always a hard stop, and a later "allowed" event clears it, so the plugin reports a limit only when a call actually fails. Reset times can be hours or days away (weekly limits).
 - **Cancelling.** opencode doesn't pass an abort signal to our model. When it stops, it cancels the stream it was reading from us, so the stream's cancel callback calls `interrupt()`. That aborts any waiting tool handler, Claude Code records the call as rejected, and the session keeps working for the next message. When opencode cancels between steps instead, Claude is still waiting on a tool result. The next request holds whatever result opencode saved, and the plugin answers the waiting handler with it, so both copies match.
 
@@ -313,7 +315,6 @@ These opencode features won't work with Claude Code models:
 
 - **Catch-up messages.** Does Claude pick up a catch-up message well, treating it as the conversation so far and carrying on naturally? To be tested in phase 3, and the format adjusted if needed.
 - **Resuming while a tool call waits.** If the `claude` process closes while Claude waits on tool results (idle shutdown or an opencode restart), can we `resume` and send the results as `tool_result` blocks in the next user message? If not, they go in a tagged text message holding the full results, followed by any user messages that arrived since.
-- **The user's own Claude Code skills and commands.** Claude Code's start-up reply still lists the user's commands and skills from `~/.claude` (such as their own skills) even with `settingSources: []`. Check in phase 1 that `skills: []` and `verbatimPrompts` keep them away from the model. If they don't, find the documented setting that does.
 
 ## Code structure
 
@@ -344,7 +345,8 @@ opencode-claude-code/
 │   │
 │   ├── claude/             The only code that starts or talks to Claude Code
 │   │   ├── io.ts           Starting claude and Claude's session files (fork, delete). Tests swap it
-│   │   ├── options.ts      Shared settings: user's binary, everything we turn off, permissions
+│   │   ├── query-options.ts  Shared settings: user's binary, everything we turn off, permissions
+│   │   ├── status.ts       The login check's latest result, shared by every feature
 │   │   ├── session.ts      One long-lived claude process: send, read, interrupt, branch, restart
 │   │   ├── sessions.ts     opencode session ID → live Claude session, idle shutdown, kept across plugin reloads
 │   │   ├── one-shot.ts     Single throwaway query: titles, ctx.generate
@@ -423,7 +425,7 @@ export default make(ClaudeIO.real)
 1. `plugin/aisdk.ts` has given opencode our model from `language-model/claude-code-provider.ts`.
 2. opencode calls `doStream` in `claude-code-language-model.ts`, which reads the session and kind headers.
 3. `sync/decide.ts` compares the request with the record from `sync/record.ts` and picks one of the four cases. `sync/catch-up.ts` builds a catch-up message when one is needed.
-4. `claude/sessions.ts` returns the live Claude session, starting or resuming it with the settings from `claude/options.ts`.
+4. `claude/sessions.ts` returns the live Claude session, starting or resuming it with the settings from `claude/query-options.ts`.
 5. `convert-to-claude-message.ts` builds the message, or `tools/pending.ts` hands over the tool results Claude is waiting on.
 6. `convert-claude-stream.ts` turns Claude's replies into opencode stream events. A tool call parks its handler in `tools/pending.ts` and ends the step.
 
@@ -432,7 +434,7 @@ export default make(ClaudeIO.real)
 | Change | Where |
 |---|---|
 | A new opencode hook we need | New file in `plugin/`, added to the list in `index.ts` |
-| Another Claude Code feature to turn off | `claude/options.ts` |
+| Another Claude Code feature to turn off | `claude/query-options.ts` |
 | A new attachment type | `convert-to-claude-message.ts` |
 | A new kind of history change | `sync/decide.ts`, plus a test |
 | A new side-call kind | `request-kind.ts`, plus a branch in the language model |
@@ -464,23 +466,23 @@ A phase is done when its tests and its cases in TESTING.md pass, its "done when"
 
 ### 1. Setup and test harness
 
-**Build:** the layout from Code structure, loading the plugin from its folder, the `file://` placeholder package (checked both from source and from a build), provider and model registration from the saved list and then `supportedModels()` (context size, effort variants, empty cost), the `external` login method, the zero-token login check, the isolation settings, and `ClaudeIO`.
+**Build:** the layout from Code structure, loading the plugin from its folder, the `file://` placeholder package, provider and model registration from the saved list and then the login check's model list (effort variants, Haiku's family, empty cost), the `external` login method, the zero-token login and version checks, the isolation settings, and `ClaudeIO`.
 
-**Test harness:** the fake `claude` (start-up only at first), the in-memory session files, the opencode-in-a-test helper, the test plugin with its scripted model, recording, the live-test gate and the packaging check.
+**Test harness:** the fake `claude` (start-up only at first), the opencode-in-a-test helper, recording, the live-test gate and the packaging check. The test plugin comes in phase 3 and the in-memory session files in phase 5, where they are first used.
 
 **Done when:** Claude Code models show in the TUI and the login method shows as connected. A test running opencode sees the same models. The packaging check loads the plugin from its folder. A live run records a start-up.
 
 ### 2. Text chat
 
-**Build:** no tools yet. One long-lived Claude session per opencode session, with the kind header, resume across turns, cancelling, stopping processes in the right order, the registry that survives plugin reloads, usage per API message, `verbatimPrompts`, and image and PDF attachments.
+**Build:** no tools yet. One long-lived Claude session per opencode session, with the kind header, resume across turns, cancelling, stopping processes in the right order, the registry that survives plugin reloads, usage per API message, `verbatimPrompts`, and image and PDF attachments. The packaging check adds an `opencode run` that gets a reply from `test/bin/claude`, which also checks the `file://` placeholder in the released `opencode`. Until our model can answer, opencode retries its error, so phase 1 can't check this.
 
 **Done when:** a conversation in the TUI works across several turns and after restarting opencode, cancelling leaves a usable session, and token counts and context size show correctly.
 
 ### 3. Sync
 
-**Build:** fingerprints, the record, catch-up messages, the four cases, and the Claude IDs in provider metadata. Still no tools.
+**Build:** fingerprints, the record, catch-up messages, the four cases, and the Claude IDs in provider metadata. Still no tools. Until branching is added in phase 5, case 3 (changed or shortened history) uses case 4's safe fallback: a fresh Claude session with a catch-up of the current history.
 
-**Done when:** in the TUI, a session can switch from Claude Code to another model and back, in both directions, and Claude remembers what happened while it was away. Tests cover all four cases, including a `context` hook that edits history.
+**Done when:** in the TUI, a session can switch from Claude Code to another model and back, in both directions, and Claude remembers what happened while it was away. Tests cover all four decisions, including a `context` hook that edits history and verifies the fresh-session fallback for case 3.
 
 ### 4. Tools
 

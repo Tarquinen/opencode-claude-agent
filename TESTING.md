@@ -67,8 +67,8 @@ const claude = FakeClaude.make([
 - `expect...` steps check what the SDK wrote. `send` steps write a line as `claude`. `ask...` steps send a request and wait for the SDK's answer.
 - The fake answers the start-up request with a recorded start-up reply.
 - It keeps everything the SDK sent (flags, environment, start-up request, user messages, answers), so tests check both directions.
-- A test fails if a step is left unused, or if the SDK writes something the script didn't expect.
-- Tests wait on the fake's steps (`claude.reached(step)`), never on time.
+- A test fails if a step is unfinished, including a requested step whose reply is still held back, or if the SDK writes something the script didn't expect. A test that deliberately interrupts a held reply checks that it is unfinished and that the process closes.
+- Tests wait on the fake's steps (`claude.started(step)` before a held reply, `claude.reached(step)` after it finishes), never on time. Each run also exposes `closed` to check cleanup. Changes the plugin then makes inside opencode in the background (a new model list, a connection problem) are awaited by checking again every few milliseconds until they show (`TestOpenCode.waitUntil`), as opencode's own tests do.
 - A recording can be replayed as a script: its SDK lines become `expect` steps and its `claude` lines become `send` and `ask` steps.
 
 Branching and deleting Claude sessions (`forkSession`, `deleteSession`) work on Claude's session files directly (`sdk.d.ts:840-866`), not through `claude`. They are part of `ClaudeIO` (below), and level 2 and 3 tests replace them with a small in-memory version.
@@ -98,7 +98,7 @@ const messages = await oc.sessions.context({ sessionID: session.id })
 
 Tests check what opencode saved, what the fake received, and what our plugin stored.
 
-**Packaging check.** One test loads the plugin from its folder through an opencode config file and runs `opencode run` with a fake `claude` executable (`test/bin/claude`, the same fake over real stdin and stdout) passed through the plugin's `claudePath` option. It checks the root `server.ts`, the `file://` placeholder and real option parsing. It uses the `opencode` on `PATH` and is skipped if there isn't one.
+**Packaging check.** One test loads the plugin from its folder through an opencode config file, in a fresh home folder, with a fake `claude` executable (`test/bin/claude`, the same fake over real stdin and stdout) passed through the plugin's `claudePath` option. It runs `opencode auth login` and `opencode models`, and from phase 2 an `opencode run` that gets a reply. It checks the root `server.ts`, real option parsing and, through `opencode run`, the `file://` placeholder in the released `opencode`. It uses the `opencode` on `PATH` and is skipped if there isn't one.
 
 ## Level 4: live
 
@@ -128,7 +128,7 @@ Scenarios:
 
 ## Recordings
 
-`RECORD=1` wraps the real spawn function and saves every line in both directions, one file per scenario in `test/recordings/`.
+`RECORD=1` wraps the real spawn function and saves every line in both directions, one file per scenario in `test/recordings/` (`test/lib/recorder.ts`). The start-up recordings (`startup`, `startup-logged-out`) come from a login check run on its own, so each file holds one complete `claude` run.
 
 - The first line of each file holds the Claude Code version, SDK version, model and date.
 - Before saving, personal details are replaced: account email, organization, user name and home folder paths.
@@ -176,14 +176,20 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | Case | Level | Phase |
 |---|---|---|
 | The start-up flags and environment turn off everything listed in PLAN.md | 2 | 1 |
-| Models show before the slow login check finishes, and several checks share one run | 3 | 1 |
+| Models show from the built-in list until the login check finishes, then from claude's list, with effort variants, Haiku's family, attachment support and empty cost | 3 | 1 |
+| Saved models are restored after an opencode restart, before the next login check finishes | 3 | 1 |
+| Connecting after the login check shows its result (logged out → sign-in problem), and checks again | 3 | 1 |
+| Startup and reconnect checks run in order, so an older account snapshot cannot overwrite the new login | 2 | 1 |
+| Installing claude after startup is picked up by the next login check | 2 | 1 |
+| A failed startup is reported and the next check can recover; a stuck startup times out and closes its process | 2 | 1 |
+| An old or unreported Claude Code version asks the user to update; the minimum supported version is accepted | 2 | 1 |
 | Text, thinking and usage arrive in order | 2 | 2 |
 | Usage counts each API message once, and context size comes from the last API call, not a sum | 1 | 2 |
 | Shutdown goes interrupt, then drain, then close | 2 | 2 |
 | One process per session, and an old process stopping never closes its replacement | 2 | 2 |
 | A plugin reload keeps live sessions, and waiting tool calls once tools exist | 2 | 2, 4 |
 | Switching to another model and back sends only the missed turns, then resumes normally | 3 | 3 |
-| Each of the four sync cases, including edited replies and tool results, user messages in a different order, tool images in their own message, and a missing Claude session | 1, 3 | 3 |
+| Each of the four sync decisions, with case 3 using a fresh-session fallback until phase 5; edited replies, reordered user messages and a missing Claude session, plus edited tool results and tool images once tools exist | 1, 3 | 3, 4 |
 | Several tool calls in one reply match the right IDs | 2 | 4 |
 | Cancelling during a tool call stops the handler, and Claude records the call as refused | 2 | 4 |
 | Cancelling between steps answers the waiting handler with opencode's saved result | 3 | 4 |
@@ -206,9 +212,10 @@ test/
 ├── lib/
 │   ├── effect.ts          it.effect / it.live helper
 │   ├── fake-claude.ts     The fake claude: script steps, replies, everything the SDK sent
-│   ├── fake-io.ts         ClaudeIO with the fake claude and in-memory session files
-│   ├── opencode.ts        Starts opencode in the test with our plugin and the test plugin
-│   └── test-plugin.ts     Scripted "normal" model, test tool, history-editing hook
+│   ├── fake-io.ts         ClaudeIO with the fake claude, plus in-memory session files from phase 5
+│   ├── recorder.ts        RECORD=1: saves real claude traffic; loads recordings for the fake
+│   ├── opencode.ts        Starts opencode in the test with our plugin (and the test plugin from phase 3)
+│   └── test-plugin.ts     Phase 3: scripted "normal" model, test tool, history-editing hook
 ├── bin/
 │   └── claude             The fake as a real executable, for the packaging check
 ├── recordings/            Real runs, one file per scenario
