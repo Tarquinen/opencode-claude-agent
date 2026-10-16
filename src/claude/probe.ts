@@ -14,6 +14,14 @@ export class ProbeError extends Data.TaggedError("ClaudeProbeError")<{ readonly 
 // Older binaries silently ignore verbatimPrompts and can interpret user text as Claude commands.
 const MINIMUM_VERSION = "2.1.248"
 
+export function versionError(version: string | undefined) {
+  if (version && Bun.semver.satisfies(version, `>=${MINIMUM_VERSION}`)) return
+  const message = version
+    ? `Claude Code ${version} is too old; ${MINIMUM_VERSION} or later is required.`
+    : "Claude Code did not report its version, so compatibility could not be checked."
+  return new Error(`${message} Run \`claude update\`.`)
+}
+
 // Starts `claude` with an input that never sends a message, reads what it reports at start-up, then stops it.
 // No model call is made, so no tokens are used.
 export const run = Effect.fn("ClaudeProbe.run")(function* (options: Options) {
@@ -36,14 +44,9 @@ export const run = Effect.fn("ClaudeProbe.run")(function* (options: Options) {
       orElse: () => Effect.fail(new ProbeError({ cause: new Error("claude did not start within 30 seconds") })),
     }),
   )
-  const version = init.claude_code_version
-  if (!version || !Bun.semver.satisfies(version, `>=${MINIMUM_VERSION}`)) {
-    const message = version
-      ? `Claude Code ${version} is too old; ${MINIMUM_VERSION} or later is required.`
-      : "Claude Code did not report its version, so compatibility could not be checked."
-    return yield* Effect.fail(new ProbeError({ cause: new Error(`${message} Run \`claude update\`.`) }))
-  }
-  return { version, account: init.account, models: init.models } satisfies Result
+  const error = versionError(init.claude_code_version)
+  if (error) return yield* Effect.fail(new ProbeError({ cause: error }))
+  return { version: init.claude_code_version!, account: init.account, models: init.models } satisfies Result
 })
 
 // Logged in with a Claude subscription, so calls use plan limits rather than API billing

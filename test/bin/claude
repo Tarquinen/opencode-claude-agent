@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // The fake `claude` as a real program, for the packaging check (TESTING.md). Answers every start-up with the
-// recorded reply, and adds a line to $FAKE_CLAUDE_LOG each time it starts.
+// recorded reply, replays a text turn, and logs each process to $FAKE_CLAUDE_LOG.
 import { appendFileSync } from "node:fs"
 import { createInterface } from "node:readline"
 import { FakeClaude } from "../lib/fake-claude.ts"
@@ -12,5 +12,8 @@ for await (const line of createInterface({ input: process.stdin })) {
   const message = JSON.parse(line)
   if (message.type === "control_request" && message.request.subtype === "initialize") {
     process.stdout.write(JSON.stringify(FakeClaude.startupResponse(message.request_id, startup.reply)) + "\n")
+  } else if (message.type === "user" || message.request?.subtype === "interrupt") {
+    const step = message.type === "user" ? FakeClaude.expectTurn() : FakeClaude.expectInterrupt()
+    for (const reply of FakeClaude.replies(step, message.request_id)) process.stdout.write(JSON.stringify(reply) + "\n")
   }
 }

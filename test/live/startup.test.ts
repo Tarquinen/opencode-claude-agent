@@ -12,7 +12,7 @@ import { Recorder } from "../lib/recorder.js"
 
 // Needs a real, logged-in `claude`. Run with `bun run test:live`, or `RECORD=1 bun run test:live` to save new
 // recordings. `claude auth status` exits with 1 when logged out.
-const live = process.env.CLAUDE_LIVE === "1" && Bun.spawnSync(["claude", "auth", "status"]).exitCode === 0
+const live = !process.env.CI && process.env.CLAUDE_LIVE === "1" && Bun.spawnSync(["claude", "auth", "status"]).exitCode === 0
 
 // An empty config folder is a `claude` that has never logged in
 const loggedOutIO = Effect.gen(function* () {

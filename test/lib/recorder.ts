@@ -6,7 +6,7 @@ import { homedir } from "node:os"
 import path from "node:path"
 import { PassThrough } from "node:stream"
 import { createInterface } from "node:readline"
-import type { Options } from "@anthropic-ai/claude-agent-sdk"
+import type { Options, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk"
 
 export const enabled = process.env.RECORD === "1"
 
@@ -79,6 +79,15 @@ export function load(name: string): Line[] {
     lines.push(JSON.parse(line))
   }
   return lines
+}
+
+// An independent usage oracle for tests: the CLI's result, rather than our stream converter.
+export function result(name: string, index = 0): SDKResultMessage {
+  let seen = 0
+  for (const line of load(name)) {
+    if (line.from === "claude" && line.message.type === "result" && seen++ === index) return line.message
+  }
+  throw new Error(`No result ${index} in ${name}`)
 }
 
 function sdkVersion(): string {

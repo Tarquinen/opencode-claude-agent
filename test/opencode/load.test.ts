@@ -2,16 +2,12 @@ import { describe, expect } from "bun:test"
 import { Model } from "@opencode/plugin/effect"
 import path from "node:path"
 import { Effect } from "effect"
-import type { ClaudeIO } from "../../src/claude/io.js"
 import { ClaudeProvider } from "../../src/plugin/provider.js"
 import { it } from "../lib/effect.js"
 import { FakeClaude } from "../lib/fake-claude.js"
 import { FakeIO } from "../lib/fake-io.js"
 import { TestOpenCode } from "../lib/opencode.js"
 import { Recorder } from "../lib/recorder.js"
-
-// No `claude` on this machine, as far as the plugin can tell
-const noClaude: ClaudeIO.Interface = { which: () => undefined, env: () => ({}) }
 
 describe("loading the plugin", () => {
   it.live("models show from the built-in list until the login check finishes, then from claude", () =>
@@ -100,12 +96,16 @@ describe("loading the plugin", () => {
 
   it.live("opencode calls our model through the placeholder package", () =>
     Effect.gen(function* () {
-      const test = yield* TestOpenCode.start({ io: noClaude })
+      const onConnect = FakeClaude.expectStartup()
+      // Generate loads its location's plugin instance as well as the server-level provider catalog.
+      const claude = FakeClaude.make([FakeClaude.expectStartup(), onConnect, FakeClaude.expectStartup(), FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt()])
+      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }) })
       yield* TestOpenCode.connect(test.opencode)
-      const error = yield* test.opencode.generate
+      yield* Effect.promise(() => claude.reached(onConnect))
+      const result = yield* test.opencode.generate
         .text({ prompt: "hello", model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("sonnet") }) })
-        .pipe(Effect.flip)
-      expect(String(error)).toContain("Claude Code chat is not implemented yet")
+      expect(result.text).toBe("COPPER-OTTER")
+      claude.check()
     }),
   )
 })

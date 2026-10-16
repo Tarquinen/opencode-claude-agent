@@ -53,6 +53,8 @@ describe.skipIf(!opencode)("packaging", () => {
         yield* run(["auth", "login", "claude-code", "--method", "claude-login"])
         const models = yield* run(["models"])
         expect(models).toContain("claude-code/sonnet")
+        const reply = yield* run(["run", "--model", "claude-code/haiku", "Reply with the marker."])
+        expect(reply).toContain("COPPER-OTTER")
         // The plugin started our fake from the `claudePath` option, not the `claude` on PATH
         const starts = yield* Effect.promise(() => readFile(log, "utf8"))
         expect(starts).toContain("--tools=")

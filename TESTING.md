@@ -18,6 +18,7 @@ Commands:
 - `bun test`: levels 1 to 3. Runs in CI.
 - `bun run test:live`: level 4. Needs `CLAUDE_LIVE=1` and a logged-in `claude`. Never runs in CI.
 - `RECORD=1 bun run test:live`: level 4, saving new recordings.
+- `CLAUDE_PROMPT_MATRIX=1 bun test test/live/prompts.test.ts`: opt-in prompt compatibility experiments, including a real SDK MCP call. Uses subscription auth; separate from the normal live suite.
 
 ## Why fake the `claude` program
 
@@ -29,7 +30,7 @@ The SDK has an official option for replacing how it starts `claude`: `spawnClaud
 
 Recorded with Claude Code 2.1.301 and SDK 0.3.301 (`/tmp/opencode/claude-sdk-lab/q9-wire.ts`). Every message is one line of JSON, in both directions.
 
-1. The SDK starts `claude` with flags for everything we set: model, allowed tools, no built-in tools, no settings, permission mode, no session files.
+1. The SDK starts `claude` with flags for everything we set: model, allowed tools, no built-in tools, no settings, permission mode, and either a session ID/resume or no session persistence for side calls.
 2. The SDK sends a start-up request (`control_request` `initialize`). It holds the system prompt, our hook IDs and our MCP server with its full tool list.
 3. `claude` replies (`control_response`) with its version, account, models and commands.
 4. The SDK sends the user message.
@@ -54,24 +55,22 @@ The real plugin model code and the real SDK, with `test/lib/fake-claude.ts` in p
 ```ts
 const claude = FakeClaude.make([
   FakeClaude.expectStartup(),
-  FakeClaude.expectUser({ text: "read the readme" }),
-  FakeClaude.send(assistantToolUse({ id: "toolu_1", name: "mcp__opencode__read", input: { path: "README.md" } })),
-  FakeClaude.askHook("PreToolUse", { tool_use_id: "toolu_1" }),
-  FakeClaude.askTool("mcp__opencode__read", { toolUseId: "toolu_1" }), // waits for our handler
-  FakeClaude.send(toolResult("toolu_1")),
-  FakeClaude.send(assistantText("done")),
-  FakeClaude.send(result()),
+  FakeClaude.expectTurn({ recording: "text", index: 0 }),
+  FakeClaude.expectTurn({ recording: "text", index: 1 }),
+  FakeClaude.expectInterrupt(),
 ])
 ```
 
-- `expect...` steps check what the SDK wrote. `send` steps write a line as `claude`. `ask...` steps send a request and wait for the SDK's answer.
+- `expect...` steps check the kind of SDK input and replay the recorded replies up to the next input. Tests assert the actual prompt content separately. Phase 4 will add individual `send` and `ask` steps for hooks and tools.
 - The fake answers the start-up request with a recorded start-up reply.
+- Embedded chat tests use `FakeClaude.make(script, { probes: true })` to answer login probes independently. These are initialization requests from processes without `--include-partial-messages`; their incidental count/order is not part of the chat script. Dedicated login tests still script probes explicitly.
 - It keeps everything the SDK sent (flags, environment, start-up request, user messages, answers), so tests check both directions.
 - A test fails if a step is unfinished, including a requested step whose reply is still held back, or if the SDK writes something the script didn't expect. A test that deliberately interrupts a held reply checks that it is unfinished and that the process closes.
 - Tests wait on the fake's steps (`claude.started(step)` before a held reply, `claude.reached(step)` after it finishes), never on time. Each run also exposes `closed` to check cleanup. Changes the plugin then makes inside opencode in the background (a new model list, a connection problem) are awaited by checking again every few milliseconds until they show (`TestOpenCode.waitUntil`), as opencode's own tests do.
-- A recording can be replayed as a script: its SDK lines become `expect` steps and its `claude` lines become `send` and `ask` steps.
+- Recorded control-response IDs are remapped to the SDK's current request IDs.
+- `expectInterrupt({ beforeResult })` can hold the final result after acknowledging an interrupt. Real Claude does this, so cancellation tests check that the next turn waits for the result. `hold` can delay the whole interrupt reply to test a new request arriving during idle shutdown.
 
-Branching and deleting Claude sessions (`forkSession`, `deleteSession`) work on Claude's session files directly (`sdk.d.ts:840-866`), not through `claude`. They are part of `ClaudeIO` (below), and level 2 and 3 tests replace them with a small in-memory version.
+Branching and deleting Claude sessions (`forkSession`, `deleteSession`) work on Claude's session files directly (`sdk.d.ts:840-866`), not through `claude`. Phase 5 adds them to `ClaudeIO` (below), with a small in-memory version for level 2 and 3 tests.
 
 ## Level 3: inside opencode
 
@@ -84,14 +83,14 @@ await using oc = await OpenCode.create({
   models: { fetch: false },
   fs: { filewatcher: false },
 })
-const session = await oc.sessions.create({ location: { directory: projectDir } })
-await oc.sessions.switchModel({ sessionID: session.id, model: { providerID: "claude-code", id: "sonnet" } })
-await oc.sessions.prompt({ sessionID: session.id, text: "Use the test tool" })
-await oc.sessions.wait({ sessionID: session.id })
-const messages = await oc.sessions.context({ sessionID: session.id })
+const session = await oc.session.create({ location: { directory: projectDir } })
+await oc.session.switchModel({ sessionID: session.id, model: { providerID: "claude-code", id: "sonnet" } })
+await oc.session.prompt({ sessionID: session.id, text: "Use the test tool" })
+await oc.session.wait({ sessionID: session.id })
+const { messages } = await oc.session.export({ sessionID: session.id })
 ```
 
-`test/lib/test-plugin.ts` adds:
+In phase 3, `test/lib/test-plugin.ts` will add:
 
 - **A scripted "normal" model.** A provider whose model is a hand-written `LanguageModelV3` that replies from a list, like the one in `packages/core/test/aisdk.test.ts:43-74`. Used for switching tests. opencode's `TestLLM` can't be used, because it replaces every model, ours included.
 - **A test tool** with a fixed result, and a `context` hook that can edit history when a test asks it to.
@@ -102,7 +101,7 @@ Tests check what opencode saved, what the fake received, and what our plugin sto
 
 ## Level 4: live
 
-The level 3 setup with the real `ClaudeIO` and Haiku.
+The model/session harness and the level 3 setup with the real `ClaudeIO` and Haiku. Phase 2's chat test runs the actual model through text, resume, cancellation/recovery, attachments and a utility call whose instructions come from the request's system message, plus one Sonnet turn for thinking, since Haiku doesn't think by default; the embedded offline test separately verifies OpenCode's database-backed restart and request headers.
 
 Rules:
 
@@ -111,7 +110,7 @@ Rules:
 - Checks for marker words placed in prompts and tool results, never exact wording.
 - Prints how many model calls it made.
 - Deletes the Claude sessions it created.
-- Creates its own attachments in a temporary folder.
+- Uses its own attachment fixtures (`test/fixtures/red.png` and `marker.pdf`), with Claude sessions in a temporary folder. Regenerate those fixtures with `uv run --with reportlab python test/fixtures/create.py`.
 
 Scenarios:
 
@@ -126,9 +125,25 @@ Scenarios:
 9. A PDF from a tool result.
 10. A title.
 
+### System-prompt compatibility
+
+`test/live/prompts.test.ts` tests the actual plugin isolation settings with Claude Code's preset and representative additions: tool routing, Code Mode, MCP notes, skills, a custom role, AGENTS.md instructions, all additions together, and a large project appendix. One case registers SDK MCP tools and requires a real tool call. These are fixture tools, not the future OpenCode tool bridge.
+
+Controls try a short custom prompt and OpenCode's base prompt as a replacement and an append. `test/fixtures/opencode-system.txt` snapshots `packages/core/src/session/runner/prompt/system.txt` at OpenCode commit `0a03b4bc9c401330888513d612252350944df33c`, with its tool-guidance placeholder resolved. It is not the complete dynamically assembled TUI prompt. Control failures are reported, rather than failing the supported preset configuration tests.
+
+An earlier TUI run received `400 Third-party apps now draw from your extra usage, not your plan limits`. On 2026-10-16, both an exploratory 11-case matrix and this checked-in 12-case matrix passed on Claude Code 2.1.301 / SDK 0.3.301 / Haiku with subscription auth. They covered all planned instruction categories, a roughly 65 KB appendix, both OpenCode base-prompt controls, and (in the second matrix) an actual SDK MCP call. The original rejection was not reproduced; these results do not establish its cause or guarantee every future prompt will work.
+
+Source review:
+
+- [OpenChamber's prompt builder](https://github.com/openchamber/opencode-claude/blob/9fa38cfac2b7165c01423f583ccfa56239448209/src/proxy.ts#L1457-L1493) appends all these instruction categories to the preset. [Its failure mapper](https://github.com/openchamber/opencode-claude/blob/9fa38cfac2b7165c01423f583ccfa56239448209/src/failure.ts) classifies extra-usage errors as billing failures (HTTP 402), rather than retrying them.
+- [T3 Code](https://github.com/pingdotgg/t3code/blob/f1e0a4d4d0600b2803e311989151c7f89ced3251/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts#L1189-L1195) uses the preset with runtime and optional orchestration instructions. Its result-error handling explicitly marks API 429/529 retryable; it has no special extra-usage prompt workaround.
+- OpenCode's `packages/ai/src/provider-error.ts` retries unknown provider errors. Plain SDK terminal errors reach that path through `packages/core/src/aisdk.ts`. The embedded failure test reproduced a repeated turn before our provider-scoped retry hook was added; it now verifies one request and a visible error. Claude Code handles its own API retries.
+
 ## Recordings
 
 `RECORD=1` wraps the real spawn function and saves every line in both directions, one file per scenario in `test/recordings/` (`test/lib/recorder.ts`). The start-up recordings (`startup`, `startup-logged-out`) come from a login check run on its own, so each file holds one complete `claude` run.
+
+Phase 2 adds `text` (two turns), `text-resume`, `text-cancel` (interrupt then recovery), `attachments`, `utility` (side-call instructions) and `thinking` (Claude Code hides Sonnet's thinking text by default, so it arrives empty). Each is one complete process. Chat recordings use the Claude Code preset and OpenCode runtime note; `utility` uses the small fixed system prompt. The thinking test is separate, so it can be recorded on its own with `-t thinking`. The live test regenerates these through the plugin model itself. Run recording and offline tests sequentially, since recording replaces fixtures. Usage assertions compare converted counts with the recorded terminal result, so re-recording does not require copying token totals into test code.
 
 - The first line of each file holds the Claude Code version, SDK version, model and date.
 - Before saving, personal details are replaced: account email, organization, user name and home folder paths.
@@ -151,7 +166,7 @@ export const make = (io: ClaudeIO.Interface) =>
   define({
     id: "claude-code",
     effect: Effect.fn("ClaudeCode.Plugin")(function* (ctx) {
-      // ...same as PLAN.md's entry point, with io passed to ClaudeSessions.make
+      // ...same as PLAN.md's entry point, with io passed to registry.attach
     }),
   })
 
@@ -163,7 +178,7 @@ export default make(ClaudeIO.real)
 opencode's unit test rules apply (`.opencode/skills/unit-tests` in the opencode repo):
 
 - `bun test`, with a timeout on each test.
-- No sleeps. Races are tested with gates (`Deferred`) and the fake's steps. Time-based behavior, such as idle shutdown and the reload handover, uses Effect's `TestClock`.
+- No sleeps. Races are tested with gates (`Deferred`) and the fake's steps. Registry timer tests use Effect's `TestClock`. The embedded host owns a separate clock, so its restart test gives each opencode host its own registry and closes it, as an exiting opencode process would, instead of waiting out the ten-second handover.
 - No `mock.module` and no `globalThis`. Fakes come in through `ClaudeIO` and plugin options.
 - Each test gets its own temporary folders.
 - A small `it.effect` / `it.live` helper copied from opencode's `packages/core/test/lib/effect.ts`, since opencode doesn't publish its test helpers.
@@ -184,10 +199,20 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | A failed startup is reported and the next check can recover; a stuck startup times out and closes its process | 2 | 1 |
 | An old or unreported Claude Code version asks the user to update; the minimum supported version is accepted | 2 | 1 |
 | Text, thinking and usage arrive in order | 2 | 2 |
-| Usage counts each API message once, and context size comes from the last API call, not a sum | 1 | 2 |
+| Usage counts each API message once, and context size comes from the last API call, not a sum (a turn makes several calls only once tools exist) | 1 | 2, 4 |
 | Shutdown goes interrupt, then drain, then close | 2 | 2 |
 | One process per session, and an old process stopping never closes its replacement | 2 | 2 |
 | A plugin reload keeps live sessions, and waiting tool calls once tools exist | 2 | 2, 4 |
+| Cancelling before initialization closes the process without saving a nonexistent session; chat rejects an incompatible CLI before sending user input | 2 | 2 |
+| Text cancellation drains the result, then another turn can use the same process | 2, 4 | 2 |
+| Idle shutdown and server restart resume the saved Claude ID; OpenCode persists the reply and token counts | 2, 3, 4 | 2 |
+| Chat keeps the Claude Code preset and host note; changes to opencode's built-in system prompt do not replace it or restart the session | 2 | 2 |
+| Titles, compaction and generate use independent, non-persistent processes and preserve their task instructions in the user message | 2, 4 | 2 |
+| Closing the registry interrupts, drains and closes an active side call, without saving it as a primary session | 2 | 2 |
+| A terminal Claude error is shown once, without opencode replaying the whole turn | 3 | 2 |
+| Switching model restarts the process and resumes the same Claude session | 2 | 2 |
+| Text stays verbatim; image and PDF inputs reach Claude as real content blocks | 1, 2, 4 | 2 |
+| A resumed turn preserves the whole newest user group; utility requests preserve instructions and history roles; unsupported media reports a clear error | 1 | 2 |
 | Switching to another model and back sends only the missed turns, then resumes normally | 3 | 3 |
 | Each of the four sync decisions, with case 3 using a fresh-session fallback until phase 5; edited replies, reordered user messages and a missing Claude session, plus edited tool results and tool images once tools exist | 1, 3 | 3, 4 |
 | Several tool calls in one reply match the right IDs | 2 | 4 |
@@ -200,7 +225,7 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | Undo and fork branch from the right message | 3, 4 | 5 |
 | Compaction stops a waiting tool call and doesn't reuse the old process | 3 | 5 |
 | Generate calls running at the same time don't cancel each other | 3 | 5 |
-| A changed system prompt restarts the process, and an unchanged one never does | 2 | 6 |
+| A changed custom agent role or forwarded project instructions restart the process; unchanged effective Claude instructions do not | 2 | 6 |
 | A "successful" result after server errors (`api_error_status`) becomes an error | 1, 2 | 6 |
 | Plan-limit events: "rejected" vs "allowed", and weekly reset dates | 1 | 6 |
 | An `ANTHROPIC_API_KEY` in the environment shows the billing warning | 3 | 6 |
@@ -215,10 +240,12 @@ test/
 │   ├── fake-io.ts         ClaudeIO with the fake claude, plus in-memory session files from phase 5
 │   ├── recorder.ts        RECORD=1: saves real claude traffic; loads recordings for the fake
 │   ├── opencode.ts        Starts opencode in the test with our plugin (and the test plugin from phase 3)
+│   ├── sessions.ts        Model/session harness with isolated registry and storage
 │   └── test-plugin.ts     Phase 3: scripted "normal" model, test tool, history-editing hook
 ├── bin/
 │   └── claude             The fake as a real executable, for the packaging check
 ├── recordings/            Real runs, one file per scenario
+├── fixtures/              Red image, marker PDF and generator; OpenCode base prompt snapshot
 ├── language-model/        Levels 1 and 2, same folders as src/
 ├── sync/
 ├── tools/

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { Effect, Schedule } from "effect"
 import type { ClaudeIO } from "../../src/claude/io.js"
+import type { ClaudeSessions } from "../../src/claude/sessions.js"
 import { make } from "../../src/index.js"
 import { ClaudeIntegration } from "../../src/plugin/integration.js"
 import { ClaudeProvider } from "../../src/plugin/provider.js"
@@ -25,6 +26,7 @@ export const start = Effect.fn("TestOpenCode.start")(function* (input: {
   readonly io: ClaudeIO.Interface
   readonly directory?: string
   readonly database?: string
+  readonly registry?: ClaudeSessions.Registry
 }) {
   const directory = input.directory ?? (yield* tempDirectory)
   const opencode = yield* OpenCode.create({
@@ -32,7 +34,7 @@ export const start = Effect.fn("TestOpenCode.start")(function* (input: {
     config: { directory, project: false, content: "{}" },
     models: { fetch: false },
     fs: { filewatcher: false },
-    plugins: [make(input.io)],
+    plugins: [make(input.io, input.registry)],
   })
   // Listing models waits for plugins to finish loading
   yield* opencode.model.list()
