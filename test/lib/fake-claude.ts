@@ -3,7 +3,7 @@ export * as FakeClaude from "./fake-claude.js"
 import { EventEmitter } from "node:events"
 import { createInterface } from "node:readline"
 import { PassThrough } from "node:stream"
-import type { Options, SDKControlInitializeResponse, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk"
+import type { Options, SDKControlInitializeResponse, SessionMessage, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk"
 import { Recorder } from "./recorder.js"
 
 // One step of a script. Each `claude` the SDK starts takes the next steps in order.
@@ -135,6 +135,9 @@ export type Fake = ReturnType<typeof make>
 export function make(script: readonly Step[], options?: { readonly probes?: boolean }) {
   const runs: Run[] = []
   const errors: string[] = []
+  const transcripts = new Map<string, SessionMessage[]>()
+  const forks: Array<{ source: string; boundary: string; sessionID: string }> = []
+  const removed: string[] = []
   let next = 0
   let completed = 0
   const probeReply = options?.probes ? Recorder.startupReply(Recorder.load("startup")) : undefined
@@ -180,6 +183,7 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
     }
     if (step.type === "exchange" && message.type === "control_request") requestIDs.set(step.input.request_id, message.request_id)
     next++
+    if (message.type === "user") remember(run, message)
     step.started.resolve()
     await Promise.race([step.hold, closed])
     if (process.exitCode !== null || process.signalCode !== null) return
@@ -202,6 +206,7 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
           reply = { ...reply, request: { ...reply.request, callback_id: initialize.hooks[event][0].hookCallbackIds[0] } }
         }
         const sessionID = run.args.find((arg) => arg.startsWith("--session-id=") || arg.startsWith("--resume="))?.split("=")[1]
+        remember(run, reply)
         process.stdout.write(JSON.stringify(sessionID && "session_id" in reply ? { ...reply, session_id: sessionID } : reply) + "\n")
       }
     }
@@ -209,9 +214,41 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
     step.done.resolve()
   }
 
+  function remember(run: Run, message: any) {
+    if (run.args.includes("--no-session-persistence") || !message.uuid || (message.type !== "user" && message.type !== "assistant")) return
+    const id = run.args.find((arg) => arg.startsWith("--session-id=") || arg.startsWith("--resume="))?.split("=")[1]
+    if (!id) return
+    const messages = transcripts.get(id) ?? []
+    if (!messages.some((saved) => saved.uuid === message.uuid)) messages.push({ ...message, session_id: id })
+    transcripts.set(id, messages)
+  }
+
   return {
     spawn,
     runs,
+    transcripts,
+    forks,
+    removed,
+    async fork(source: string, boundary: string) {
+      const history = transcripts.get(source) ?? []
+      const end = history.findIndex((message) => message.uuid === boundary)
+      if (end < 0) return
+      const sessionID = crypto.randomUUID()
+      const messages = new Map<string, string>()
+      const copied = []
+      for (const message of history.slice(0, end + 1)) {
+        const uuid = crypto.randomUUID()
+        messages.set(message.uuid, uuid)
+        copied.push({ ...message, session_id: sessionID, uuid })
+      }
+      transcripts.set(sessionID, copied)
+      forks.push({ source, boundary, sessionID })
+      return { sessionID, messages }
+    },
+    async remove(sessionID: string) {
+      transcripts.delete(sessionID)
+      removed.push(sessionID)
+    },
     // Resolves when the SDK has requested a step, before any hold is released
     started: (step: Step) => step.started.promise,
     // Resolves once the fake has finished the step

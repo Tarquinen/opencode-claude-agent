@@ -248,29 +248,39 @@ describe("Claude sessions", () => {
     claude.check()
   }))
 
-  it.effect("side calls preserve instructions in disposable processes without changing the main session", () => Effect.gen(function* () {
+  it.effect("titles keep their task prompt and conversation branches keep Claude's preset without changing the main session", () => Effect.gen(function* () {
     const claude = FakeClaude.make([FakeClaude.expectStartup(), FakeClaude.expectTurn(),
       FakeClaude.expectStartup(), FakeClaude.expectTurn({ recording: "utility" }), FakeClaude.expectInterrupt(),
       FakeClaude.expectStartup(), FakeClaude.expectTurn({ recording: "utility" }), FakeClaude.expectInterrupt(),
+      FakeClaude.expectInterrupt(),
       FakeClaude.expectStartup(), FakeClaude.expectTurn({ recording: "utility" }), FakeClaude.expectInterrupt(),
-      FakeClaude.expectTurn({ index: 1 }), FakeClaude.expectInterrupt()])
+      FakeClaude.expectStartup(), FakeClaude.expectTurn({ index: 1 }), FakeClaude.expectInterrupt()])
     const test = yield* TestSessions.start(claude)
     yield* TestSessions.reply(test.model, first)
     yield* TestSessions.reply(test.model, TestSessions.followup(), "session-a", "title")
     yield* TestSessions.reply(test.model, TestSessions.followup(), "session-a", "generate")
     yield* TestSessions.reply(test.model, TestSessions.followup(), "session-a", "compaction")
     yield* TestSessions.reply(test.model, TestSessions.followup())
-    expect(claude.runs).toHaveLength(4)
-    for (const run of claude.runs.slice(1)) {
+    expect(claude.runs).toHaveLength(5)
+    for (const run of claude.runs.slice(1, 4)) {
       expect(run.args).toContain("--no-session-persistence")
       const init = run.received.find((message) => message.request?.subtype === "initialize").request
-      expect(init.systemPrompt).toEqual(["You are a concise test assistant."])
-      expect(init.appendSystemPrompt).toBeUndefined()
+      if (run === claude.runs[1]) {
+        expect(init.systemPrompt).toEqual(["You are a concise test assistant."])
+        expect(init.appendSystemPrompt).toBeUndefined()
+      } else {
+        expect(init.systemPrompt).toBeUndefined()
+        expect(init.appendSystemPrompt).toBe(ClaudeSystemPrompt.primary.append)
+        expect(init.systemPromptSnapshot).toBe(false)
+      }
       const user = run.received.find((message) => message.type === "user")
       expect(JSON.stringify(user.message.content)).not.toContain("You are a concise test assistant.")
       expect(user.message.content).toContainEqual({ type: "text", text: "What was the marker? Reply only with it." })
     }
     expect(test.storage.data.size).toBe(1)
+    expect(claude.forks).toHaveLength(2)
+    expect(claude.removed).toEqual(claude.forks.map((fork) => fork.sessionID))
+    expect(claude.runs[1]!.args.some((arg) => arg.startsWith("--resume="))).toBe(false)
     yield* test.registry.close()
     claude.check()
   }))

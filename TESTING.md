@@ -71,7 +71,7 @@ const claude = FakeClaude.make([
 - `run.exit(code)` simulates an unexpected process exit, then yields one event-loop turn for the SDK to observe it. Recovery tests check that saved OpenCode tool results reach the replacement process.
 - `expectInterrupt({ beforeResult })` can hold the final result after acknowledging an interrupt. Real Claude does this, so cancellation tests check that the next turn waits for the result. `hold` can delay the whole interrupt reply to test a new request arriving during idle shutdown.
 
-Branching and deleting Claude sessions (`forkSession`, `deleteSession`) work on Claude's session files directly (`sdk.d.ts:840-866`), not through `claude`. Phase 5 adds them to `ClaudeIO` (below), with a small in-memory version for level 2 and 3 tests.
+Branching and deleting Claude sessions (`forkSession`, `deleteSession`) work on Claude's session files directly (`sdk.d.ts:840-866`), not through `claude`. `ClaudeIO` exposes them separately. The fake records user/assistant messages in memory, copies only the requested prefix, assigns fresh UUIDs on every fork, and tracks deletions. Live checks verify this against the actual SDK; tests never fake `query()`.
 
 The existing `ClaudeIO.sessionExists` uses SDK `getSessionInfo`; the fake defaults to a present transcript and lets a test report one missing. This tests rebuilds without inventing a CLI error protocol.
 
@@ -161,13 +161,49 @@ The checked-in title regression reproduced the original defect with a 328-charac
 
 #### Fixes
 
-- Side calls pass OpenCode's task instructions in the SDK system prompt and keep conversation source in user content. OpenCode still chooses the title agent/model and handles the result; primary chat still uses the Claude Code preset.
+- Standalone titles pass OpenCode's task instructions in the SDK system prompt and keep conversation source in user content. OpenCode still chooses the title agent/model and handles the result; conversation requests keep the Claude Code preset (including generate/compaction branches from phase 5).
 - The existing context-hook error metadata also preserves OpenCode's structured `aborted` error. On the next request, a parked Claude turn is interrupted and drained before a normal new user turn begins. Canonical saved results use the existing catch-up path, and transcript checkpoints remain valid. Active-turn steering and ordinary tool errors keep the SDK's native continuation path.
 - Offline regressions check drain ordering and both real OpenCode interruption/rejection paths; live regressions check actual replies and wire-level fresh-turn delivery.
 
 #### Recheck after fixes
 
 Typecheck, all 63 offline tests and all 11 affected live chat/tool tests passed. Repeated the original TUI scenario in the same isolated project: the automatic title was `Edit marker.txt: OLD-OTTER to APPROVED-OTTER`; the approved edit succeeded; the rejected edit left the file unchanged; and the next reply was exactly `DENIAL-RECOVERED`. After interrupting a confirmed running `cat cancel.pipe` process, the next reply was exactly `CANCEL-RECOVERED`. The Claude transcript contains both follow-ups as normal user turns with the canonical stopped-tool results, and no queued-command attachments. TUI capture and filtered transcript are saved in `/tmp/opencode/claude-tui-PDuqdg/evidence/fixed-tui.txt` and `fixed-turns.jsonl`. Phase-4 acceptance is complete.
+
+### Phase 5: branching
+
+- Pure tests select only matching historical checkpoints with no outstanding tool calls, including multiple tool calls whose results arrive separately. The current user group stays outside the fork, including when it matches the first or a later turn being retried.
+- `test/claude/branches.test.ts` checks undo with unchanged resubmitted input, repeated undo with remapped UUIDs, source lookup after registry reload, missing-transcript fallback, independent concurrent generate calls and cancellation, cleanup after a real recorded API failure, and compaction while a tool handler waits. A terminal-result gate proves compaction cannot fork before the old turn drains. The next primary request contains only the compacted history.
+- `test/opencode/branches.test.ts` exercises native `session.fork` and `session.revert` against the real host and verifies source history is unchanged. It also exercises native compaction, verifies the preset/task-input split, accepts OpenCode's required summary format, and starts the next primary request with that summary in a fresh Claude session. The context-edit test verifies that stale replies are excluded from the branch.
+- `test/live/branches.test.ts` has separate native fork/undo, unchanged-prompt resubmission, concurrent generate, and compaction cases. Each deletes only its own Claude transcripts. `branches.jsonl`, `branch-resubmit.jsonl`, `branch-generate.jsonl` and `branch-compaction.jsonl` record the successful paths. `branch-error.jsonl` preserves the earlier failed compaction request and checks cleanup/recovery rather than pretending it is a successful summary.
+- A direct SDK probe confirmed that forks copy the requested prefix with fresh UUIDs, and a resumed branch with custom `systemPrompt` and `snapshot: false` follows its own task instructions.
+
+#### Side-call rejection: comparison and resolution
+
+Initial native generate and compaction calls returned `API Error: 400 Third-party apps now draw from your extra usage, not your plan limits.`, while normal chat and fork/undo worked on the same account. Following [the comparison workflow](PLAN.md#investigating-unexpected-behavior):
+
+- [OpenChamber's side-call routing at 9fa38cf](https://github.com/openchamber/opencode-claude/blob/9fa38cfac2b7165c01423f583ccfa56239448209/src/proxy.ts#L1424-L1581) keeps the chat system profile on resumed summary branches and sends the summary task as user instructions. Fresh utility calls use a small helper prompt. Its [issue 33](https://github.com/openchamber/opencode-claude/issues/33) reports the same service error; its proposed specific trigger is third-party evidence, not a rule adopted here. [PR 57](https://github.com/openchamber/opencode-claude/pull/57) and [issue 53](https://github.com/openchamber/opencode-claude/issues/53) also discuss parked-turn reconciliation and interruption entries around compaction; our history comparison and safe-prefix fork already cover those boundaries.
+- [T3 Code's adapter at 70d60e0](https://github.com/pingdotgg/t3code/blob/70d60e03a7a35c6fa131825bbfa05ec893e69912/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts) keeps Claude's preset. Its `compactThread` sends `/compact` through the normal turn path, delegating to Claude's own compaction. That is not OpenCode's summary contract, and no equivalent side-question path was found there.
+- Native OpenCode `session.generate` sends its side question as user input; native compaction appends its structured-summary task as user input. Both also supply the assembled coding-agent system prompt. Our initial branch routing incorrectly treated that whole system prompt like the standalone title task and replaced Claude's preset.
+
+A focused public-SDK control used the same recorded summary task and parent history (CLI 2.1.302, SDK 0.3.301, Haiku). Full OpenCode custom system on a fork: rejected. The same custom system on a fresh session: rejected. Claude preset with selected host instructions on a fork: successful structured summary. Diagnostic script/results are in `/tmp/opencode/phase5-prompts-845R93`. This isolates prompt construction from fork mechanics for this reproduction; the precise service-side classification rule remains unknown.
+
+The fix uses the supported Claude preset for generate/compaction, with `snapshot: false` and OpenCode's task unchanged in user input. Standalone titles retain their own task system prompt. No error-string filtering, prompt fingerprint scrubbing, credential change or billing retry is involved. Both native live generate and compaction then passed, including concurrent branch deletion, unchanged parent history and recall after compaction.
+
+The real OpenCode 2.0.32 TUI in tmux also passed native fork and undo: forked before `FUTURE-IBIS`, added `CHILD-HERON` in the child, undid that turn, then recalled exactly `ROOT-OTTER`. The three actual Claude transcripts respectively contain ROOT+FUTURE, ROOT+CHILD, and ROOT alone. Filtered transcript evidence and the final screen are in `/tmp/opencode/claude-tui-PDuqdg/evidence/phase5`; the owned live sessions were cleaned up. Typecheck and all 70 offline tests pass.
+
+#### Final acceptance
+
+After the prompt fix, all 71 offline tests, typecheck and five focused live tests passed: native fork/undo, concurrent generate, native compaction, standalone utility instructions and title generation. The new offline native-compaction regression replays the successful summary and checks fresh-session replacement.
+
+Repeated the remaining checks in the real OpenCode 2.0.32 TUI with a temporary project and `compaction.keep.tokens: 0` so the small fixture actually compacts. `/btw` answered `SIDE-HERON ROOT-OTTER FUTURE-IBIS`; subsequent main-chat recall returned only `ROOT-OTTER FUTURE-IBIS`. Native compaction produced its structured summary, and the next primary reply again returned exactly those two original markers. The two retained primary transcripts confirm that SIDE-HERON never entered main history and that the post-compaction Claude session starts with OpenCode's summary. Temporary side branches were removed. Evidence: `side-question.txt`, `compacted.txt`, `compaction-recall.txt` and filtered transcripts under `/tmp/opencode/claude-tui-PDuqdg/evidence/phase5`. Phase-5 acceptance is complete; changes remain uncommitted.
+
+#### Review follow-up: undo and fork recovery
+
+Native OpenCode revert removes the selected user message and everything after it (`session/projector.ts:759–794`). Undoing a turn and resubmitting the same question reproduced a real failure: the plugin included that question in its fork, sent empty user content, and Claude returned `API Error: 400 This model does not support assistant message prefill. The conversation must end with a user message.` The new live regression failed before the fix and passed afterward, checking both the exact marker response and the actual SDK user input. Two offline regressions also failed before the fix. The fix only excludes the final user group from fork selection; when no earlier checkpoint exists, the existing rebuild path handles it.
+
+The review's broader fork-recovery suggestion was not supported by a normal failing workflow. SDK 0.3.301 inspection and a public-SDK control verified all four user/assistant boundaries of a real two-turn transcript: unchanged contents, fresh UUIDs, unchanged source, and the existing missing-source/boundary fallback. Control: `/tmp/opencode/phase5-fork-review.ts` (two model calls, owned sessions cleaned up). [OpenChamber at 9fa38cf](https://github.com/openchamber/opencode-claude/blob/9fa38cfac2b7165c01423f583ccfa56239448209/src/proxy.ts#L1313-L1338) catches all fork errors, while [T3 Code at f1e0a4d](https://github.com/pingdotgg/t3code/blob/f1e0a4d4d0600b2803e311989151c7f89ced3251/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts#L1482-L1522) reports invalid fork cursors. Neither establishes a need for extra recovery here. The plan now distinguishes missing history from unexpected SDK/verification failures; no additional fallback or validation was added.
+
+Verification after the review fix: typecheck, all 71 offline tests, the new live undo/resubmit regression (three model calls), the SDK control above, and `git diff --check` passed. Live checks used Claude Code 2.1.302 / SDK 0.3.301 / Haiku.
 
 ### System-prompt compatibility
 
@@ -251,14 +287,14 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | Text cancellation drains before the next turn; if the saved partial reply differs from Claude's transcript, reconciliation rebuilds | 2, 4 | 2, 3 |
 | Idle shutdown and server restart resume the saved Claude ID; OpenCode persists the reply and token counts | 2, 3, 4 | 2 |
 | Chat keeps the Claude Code preset and host note; changes to opencode's built-in system prompt do not replace it or restart the session | 2 | 2 |
-| Titles, compaction and generate use independent, non-persistent processes and preserve their task instructions in the system prompt | 1, 2, 4 | 2 |
+| Titles preserve native task system instructions; generate/compaction branches retain the Claude preset and native task user input; all side calls run in independent, non-persistent processes | 1, 2, 4 | 2, 5 |
 | Closing the registry interrupts, drains and closes an active side call, without saving it as a primary session | 2 | 2 |
 | A terminal Claude error is shown once, without opencode replaying the whole turn | 3 | 2 |
 | Switching model restarts the process and resumes the same Claude session | 2 | 2 |
 | Text stays verbatim; image and PDF inputs reach Claude as real content blocks | 1, 2, 4 | 2 |
 | A resumed turn preserves the whole newest user group; utility requests preserve instructions and history roles; unsupported media reports a clear error | 1 | 2 |
 | Switching to another model and back catches up only missed text/tool history, then resumes normally | 2, 3, 4 | 3 |
-| Each of the four sync decisions, with case 3 using a fresh-session fallback until phase 5; edited/shortened history, reordered user groups, edited tool results and tool images | 1, 3 | 3 |
+| Each of the four sync decisions; edited/shortened history, reordered user groups, edited tool results and tool images | 1, 3 | 3, 5 |
 | A missing Claude transcript rebuilds from the full authoritative history; phase-2 records without fingerprints also rebuild | 1, 2, 4 | 3 |
 | A rejected attachment during rebuild leaves the corrected request able to recover the full history | 2, 4 | 3 |
 | Reply metadata survives OpenCode persistence; saved catch-up boundaries use real Claude transcript UUIDs | 2, 3, 4 | 3 |
@@ -273,9 +309,10 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | Catalog changes restart/resume with updated definitions; setup reloads retain the waiting handlers | 2, 4 | 4 |
 | Switching models while OpenCode executes tools lets the other model continue, then catches Claude up on return | 3 | 4 |
 | Real read/edit tools wait for OpenCode approval before changing a fixture file | 4 | 4 |
-| Undo and fork branch from the right message | 3, 4 | 5 |
-| Compaction stops a waiting tool call and doesn't reuse the old process | 3 | 5 |
-| Generate calls running at the same time don't cancel each other | 3 | 5 |
+| Undo and native forks select a safe matching checkpoint, refresh UUIDs, and preserve the old transcript | 1, 2, 3, 4 | 5 |
+| Fork sources survive registry reload; a missing transcript rebuilds from authoritative history | 2 | 5 |
+| Compaction drains a waiting tool call and the next primary request uses the summary alone | 2, 4 | 5 |
+| Concurrent generate calls and cancellation remain isolated; disposable forks are deleted on success, failure and cancellation | 2, 4 | 5 |
 | A changed custom agent role or forwarded project instructions restart the process; unchanged effective Claude instructions do not | 2 | 6 |
 | A "successful" result after server errors (`api_error_status`) becomes an error | 1, 2 | 6 |
 | Plan-limit events: "rejected" vs "allowed", and weekly reset dates | 1 | 6 |
@@ -288,7 +325,7 @@ test/
 ├── lib/
 │   ├── effect.ts          it.effect / it.live helper
 │   ├── fake-claude.ts     The fake claude: script steps, replies, everything the SDK sent
-│   ├── fake-io.ts         Fake claude and saved-session lookup; in-memory fork/delete from phase 5
+│   ├── fake-io.ts         Fake claude, saved-session lookup and in-memory fork/delete
 │   ├── recorder.ts        RECORD=1: saves real claude traffic; loads recordings for the fake
 │   ├── opencode.ts        Starts opencode in the test with our plugin and optional test plugins
 │   ├── sessions.ts        Model/session harness with isolated registry and storage

@@ -29,11 +29,12 @@ export const start = Effect.fn("TestOpenCode.start")(function* (input: {
   readonly database?: string
   readonly registry?: ClaudeSessions.Registry
   readonly plugins?: readonly Plugin[]
+  readonly config?: Record<string, unknown>
 }) {
   const directory = input.directory ?? (yield* tempDirectory)
   const opencode = yield* OpenCode.create({
     database: input.database ? { path: input.database } : undefined,
-    config: { directory, project: false, content: "{}" },
+    config: { directory, project: false, content: JSON.stringify(input.config ?? {}) },
     models: { fetch: false },
     fs: { filewatcher: false },
     plugins: [make(input.io, input.registry), ...input.plugins ?? []],

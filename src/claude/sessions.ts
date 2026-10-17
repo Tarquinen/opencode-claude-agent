@@ -24,6 +24,9 @@ export const IDLE_MS = 5 * 60_000
 interface Request {
   // Only primary calls have one. Side calls run in a throwaway process.
   readonly sessionID?: string
+  // Native OpenCode fork lineage, or the session supplying a compaction/generate snapshot.
+  readonly sourceID?: string
+  readonly compaction?: boolean
   readonly model: string
   readonly system: NonNullable<Options["systemPrompt"]>
   readonly prompt: LanguageModelV3Prompt
@@ -158,7 +161,7 @@ export function registry() {
 
     const turn = Effect.fn("ClaudeSessions.turn")(function* (entry: Entry, request: Request, start: number, results?: ReturnType<typeof ToolResult.collect>) {
       const content = yield* Effect.try({
-        try: () => request.sessionID ? CatchUp.content(request.prompt, results?.end ?? start) : ConvertToClaudeMessage.content(request.prompt),
+        try: () => request.sessionID || entry.record ? CatchUp.content(request.prompt, results?.end ?? start) : ConvertToClaudeMessage.content(request.prompt),
         catch: (error) => error instanceof Error ? error : new Error(String(error)),
       })
       // A rejected rebuild must not leave an empty process paired with the old durable record.
@@ -223,6 +226,7 @@ export function registry() {
       entry.active = undefined
       if (!request.sessionID) {
         yield* stop(entry).pipe(Effect.catch((error) => Effect.logWarning(error)))
+        if (entry.record) yield* attempt(() => input.io.remove(entry.record!.claudeSessionID)).pipe(Effect.catch((error) => Effect.logWarning(error)))
         temporary.delete(entry)
         return
       }
@@ -231,6 +235,35 @@ export function registry() {
         Effect.catch((error) => Effect.logWarning(error)),
         Effect.forkDetach,
       )
+    })
+
+    const branch = Effect.fn("ClaudeSessions.branch")(function* (entry: Entry, request: Request, source?: SessionRecord.Record) {
+      const boundary = SyncDecision.boundary(request.prompt, source)
+      if (!source || !boundary) return 0
+      // Reject unsupported input before creating a new transcript.
+      yield* Effect.try(() => CatchUp.content(request.prompt, boundary.start))
+      const fork = yield* attempt(() => input.io.fork(source.claudeSessionID, boundary.messageID))
+      if (!fork) return 0
+      entry.record = {
+        claudeSessionID: fork.sessionID,
+        history: boundary.history.map((checkpoint) => ({
+          hash: checkpoint.hash,
+          claudeMessageID: checkpoint.claudeMessageID ? fork.messages.get(checkpoint.claudeMessageID) : undefined,
+        })),
+      }
+      return boundary.start
+    }, Effect.uninterruptible)
+
+    const snapshot = Effect.fn("ClaudeSessions.snapshot")(function* (entry: Entry, request: Request) {
+      if (!request.sourceID) return 0
+      const source = entries.get(request.sourceID)
+      const copy = Effect.gen(function* () {
+        // Compaction ends the old primary context. Generate only takes a read-only snapshot.
+        if (request.compaction && source) yield* stop(source)
+        return yield* branch(entry, request, source?.record ?? (yield* records.get(request.sourceID!)))
+      })
+      // Hold the source only while copying its settled prefix, never during side-call inference.
+      return yield* (source ? source.lock.withPermit(copy) : copy)
     })
 
     const run = Effect.fn("ClaudeSessions.run")(function* (request: Request) {
@@ -259,7 +292,10 @@ export function registry() {
           start = decision.start
           if (decision.kind === "fresh" || decision.kind === "changed") {
             yield* stop(current)
+            const previous = current.record
             current.record = undefined
+            if (decision.kind === "changed") start = yield* branch(current, request, previous)
+            else if (!previous) start = yield* snapshot(current, request)
           } else if (!current.process && current.record
             && !(yield* attempt(() => input.io.sessionExists(current.record!.claudeSessionID)))) {
             yield* stop(current)
@@ -281,7 +317,7 @@ export function registry() {
               results = undefined
             }
           }
-        }
+        } else start = yield* snapshot(current, request)
         yield* turn(current, request, start, results)
       }).pipe(Effect.ensuring(release(current, request))))
     })

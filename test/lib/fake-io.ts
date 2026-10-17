@@ -16,5 +16,7 @@ export function make(input: {
     which: () => EXECUTABLE,
     env: () => input.env ?? {},
     sessionExists: input.sessionExists ?? (async () => true),
+    fork: input.claude.fork,
+    remove: input.claude.remove,
   }
 }

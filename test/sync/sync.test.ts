@@ -10,6 +10,29 @@ const past = [user("First marker"), assistant("COPPER-OTTER")]
 const record = { claudeSessionID: "claude-a", history: Fingerprint.groups(past) }
 
 describe("history reconciliation", () => {
+  test("branches only at a matching checkpoint, never midway through a group of tool calls", () => {
+    const history: LanguageModelV3Prompt = [
+      ...past,
+      user("Read two files"),
+      { role: "assistant", content: [
+        { type: "tool-call", toolCallId: "a", toolName: "read", input: { path: "a" } },
+        { type: "tool-call", toolCallId: "b", toolName: "read", input: { path: "b" } },
+      ] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: "a", toolName: "read", output: { type: "text", value: "A" } }] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: "b", toolName: "read", output: { type: "text", value: "B" } }] },
+      assistant("Read both"),
+    ]
+    const saved = { claudeSessionID: "source", history: Fingerprint.groups(history).map((group, i) => ({ hash: group.hash, claudeMessageID: `uuid-${i}` })) }
+    expect(SyncDecision.boundary(history.slice(0, 1), saved)).toBeUndefined()
+    expect(SyncDecision.boundary(history.slice(0, 3), saved)?.messageID).toBe("uuid-1")
+    expect(SyncDecision.boundary(history.slice(0, 4), saved)?.messageID).toBe("uuid-2")
+    expect(SyncDecision.boundary(history.slice(0, 5), saved)?.messageID).toBe("uuid-2")
+    expect(SyncDecision.boundary(history, saved)?.messageID).toBe("uuid-6")
+    expect(SyncDecision.boundary([user("Edited source"), ...history.slice(1)], saved)).toBeUndefined()
+    const noBoundary = { ...saved, history: saved.history.map(({ hash }) => ({ hash })) }
+    expect(SyncDecision.boundary(history, noBoundary)).toBeUndefined()
+  })
+
   test("chooses all four cases and never resumes an unverified phase-2 record", () => {
     expect(SyncDecision.decide([...past, user("Next")], record)).toEqual({ kind: "continue", start: 2 })
     expect(SyncDecision.decide([...past, user("Other model"), assistant("LILAC-HERON"), user("Next")], record)).toEqual({ kind: "catch-up", start: 2 })

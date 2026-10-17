@@ -11,8 +11,12 @@ const isAborted = Schema.is(Schema.Struct({ error: Schema.Struct({ type: Schema.
 export const Plugin = define<Scope.Scope>({
   id: "claude-code.session",
   effect: Effect.fn("ClaudeSessionHooks.Plugin")(function* (ctx) {
-    yield* ctx.session.hook("model.request", (event) => Effect.sync(() => {
+    yield* ctx.session.hook("model.request", (event) => Effect.gen(function* () {
       event.headers[RequestKind.HEADER] = event.kind
+      if (event.kind === "primary") {
+        const session = yield* ctx.session.get({ sessionID: event.sessionID }).pipe(Effect.orDie)
+        if (session.fork) event.headers[RequestKind.FORK_HEADER] = session.fork.sessionID
+      }
     }), { providerID: ClaudeProvider.ID })
     // OpenCode's AI SDK bridge lowers error results to plain text. Preserve their status before that conversion.
     yield* ctx.session.hook("context", (event) => Effect.sync(() => {

@@ -31,7 +31,9 @@ export class Model implements LanguageModelV3 {
     const tools = options.toolChoice?.type === "none" ? [] : options.tools?.filter((tool) => tool.type === "function") ?? []
     const convert = ConvertClaudeStream.make(tools)
     const headers = new Headers(options.headers as HeadersInit)
-    const primary = headers.get(RequestKind.HEADER) === "primary"
+    const kind = headers.get(RequestKind.HEADER)
+    const primary = kind === "primary"
+    const branch = kind === "generate" || kind === "compaction"
     let cancelled = false
     let task: Promise<void>
     const stream = new ReadableStream({
@@ -39,8 +41,15 @@ export class Model implements LanguageModelV3 {
         controller.enqueue({ type: "stream-start", warnings: [] })
         task = this.dependencies.run({
           sessionID: primary ? headers.get(RequestKind.SESSION_HEADER) ?? undefined : undefined,
+          sourceID: primary ? headers.get(RequestKind.FORK_HEADER) ?? undefined
+            : branch ? headers.get(RequestKind.SESSION_HEADER) ?? undefined : undefined,
+          compaction: kind === "compaction",
           model: this.modelId,
-          system: primary ? ClaudeSystemPrompt.make(options.prompt, tools.length > 0) : ClaudeSystemPrompt.utility(options.prompt),
+          // Conversation branches keep the Claude prompt. OpenCode supplies their task as user input.
+          // Titles are standalone tasks with their own system instructions.
+          system: primary ? ClaudeSystemPrompt.make(options.prompt, tools.length > 0)
+            : branch ? { ...ClaudeSystemPrompt.make(options.prompt, false), snapshot: false }
+            : ClaudeSystemPrompt.utility(options.prompt),
           prompt: options.prompt,
           tools: primary ? tools : [],
           emit: (message) => {

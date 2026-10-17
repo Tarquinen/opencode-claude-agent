@@ -59,7 +59,7 @@ describe("embedded history sync", () => {
     claude.check()
   }), 15_000)
 
-  it.live("uses a fresh session when a context hook edits an earlier reply", () => Effect.gen(function* () {
+  it.live("forks before a context hook's edited reply without copying the stale answer", () => Effect.gen(function* () {
     let edit = false
     const normal = TestPlugin.make({ replies: [], context(event) {
       if (!edit) return
@@ -80,7 +80,8 @@ describe("embedded history sync", () => {
     yield* opencode.session.wait({ sessionID: session.id })
     const runs = claude.runs.filter((run) => run.args.includes("--include-partial-messages"))
     expect(runs).toHaveLength(2)
-    expect(runs[1]!.args.some((arg) => arg.startsWith("--resume="))).toBe(false)
+    expect(claude.forks).toHaveLength(1)
+    expect(runs[1]!.args).toContain(`--resume=${claude.forks[0]!.sessionID}`)
     const user = runs[1]!.received.find((message) => message.type === "user")
     expect(JSON.stringify(user.message.content)).toContain("REVISED-MARKER")
     expect(JSON.stringify(user.message.content)).not.toContain("COPPER-OTTER")

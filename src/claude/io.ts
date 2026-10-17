@@ -1,6 +1,7 @@
 export * as ClaudeIO from "./io.js"
 
-import { getSessionInfo, type Options } from "@anthropic-ai/claude-agent-sdk"
+import { deleteSession, getSessionInfo, type Options } from "@anthropic-ai/claude-agent-sdk"
+import { ClaudeFork } from "./fork.js"
 
 // Everything that reaches outside opencode when talking to Claude Code. Tests swap it for a fake `claude`.
 export interface Interface {
@@ -11,10 +12,14 @@ export interface Interface {
   // The environment `claude` starts with, before our isolation settings
   readonly env: () => Record<string, string | undefined>
   readonly sessionExists: (sessionID: string) => Promise<boolean>
+  readonly fork: (sessionID: string, messageID: string) => Promise<ClaudeFork.Result | undefined>
+  readonly remove: (sessionID: string) => Promise<void>
 }
 
 export const real: Interface = {
   which: () => Bun.which("claude") ?? undefined,
   env: () => process.env,
   sessionExists: async (sessionID) => (await getSessionInfo(sessionID)) !== undefined,
+  fork: ClaudeFork.create,
+  remove: deleteSession,
 }
