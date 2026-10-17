@@ -75,12 +75,12 @@ export function start(options: Options) {
     ready,
     get ended() { return ended },
     get persisted() { return persisted },
-    send(content: SDKUserMessage["message"]["content"], emit: Turn["emit"]) {
+    send(content: SDKUserMessage["message"]["content"], emit: Turn["emit"], uuid = crypto.randomUUID()) {
       if (ended || stopping) throw failure ?? new Error("Claude Code session has stopped")
       if (turn) throw new Error("Claude Code is still finishing the previous turn")
       const result = Promise.withResolvers<SDKResultMessage>()
       turn = { emit, result }
-      input.enqueue({ type: "user", message: { role: "user", content }, parent_tool_use_id: null })
+      input.enqueue({ type: "user", uuid, message: { role: "user", content }, parent_tool_use_id: null })
       return result.promise
     },
     interrupt,

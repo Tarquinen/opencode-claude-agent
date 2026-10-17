@@ -1,12 +1,17 @@
 export * as ClaudeSessions from "./sessions.js"
 
-import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
+import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk"
+import type { LanguageModelV3Prompt, LanguageModelV3TextPart } from "@ai-sdk/provider"
 import { Context, Effect, Fiber, Semaphore } from "effect"
 import { ClaudeIO } from "./io.js"
 import { ClaudeQueryOptions } from "./query-options.js"
 import { ClaudeSession } from "./session.js"
 import type { ClaudeCodeOptions } from "../options.js"
 import { SessionRecord } from "../sync/record.js"
+import { Fingerprint } from "../sync/fingerprint.js"
+import { SyncDecision } from "../sync/decide.js"
+import { CatchUp } from "../sync/catch-up.js"
+import { ConvertToClaudeMessage } from "../language-model/convert-to-claude-message.js"
 
 export const HANDOVER_MS = 10_000
 export const IDLE_MS = 5 * 60_000
@@ -16,15 +21,14 @@ interface Request {
   readonly sessionID?: string
   readonly model: string
   readonly system: NonNullable<Options["systemPrompt"]>
-  // A resumed Claude session already has the history, so it only gets the newest messages.
-  readonly content: (resume: boolean) => SDKUserMessage["message"]["content"]
+  readonly prompt: LanguageModelV3Prompt
   readonly emit: (message: SDKMessage) => void
 }
 
 interface Entry {
   readonly lock: Semaphore.Semaphore
   process?: ClaudeSession.Interface
-  id?: string
+  record?: SessionRecord.Record
   model?: string
   system?: string
   idle?: Fiber.Fiber<void, never>
@@ -98,9 +102,6 @@ export function registry() {
     // Reuses the entry's running process, or starts one. A new model or system prompt needs a new process,
     // which resumes the same Claude session.
     const open = Effect.fn("ClaudeSessions.open")(function* (entry: Entry, request: Request) {
-      if (!entry.id && request.sessionID) {
-        entry.id = (yield* records.get(request.sessionID))?.claudeSessionID
-      }
       const system = JSON.stringify(request.system)
       if (entry.process?.ended || entry.model !== request.model || entry.system !== system) yield* stop(entry)
       if (!entry.process) {
@@ -115,7 +116,7 @@ export function registry() {
           systemPrompt: request.system,
           includePartialMessages: true,
           persistSession: request.sessionID !== undefined,
-          ...(entry.id ? { resume: entry.id } : { sessionId: crypto.randomUUID() }),
+          ...(entry.record ? { resume: entry.record.claudeSessionID } : { sessionId: crypto.randomUUID() }),
         }))
       }
       const process = entry.process
@@ -127,19 +128,51 @@ export function registry() {
       return process
     })
 
-    // Sends the turn and waits for Claude's result, then saves the Claude session ID.
-    const turn = Effect.fn("ClaudeSessions.turn")(function* (entry: Entry, process: ClaudeSession.Interface, request: Request) {
+    const turn = Effect.fn("ClaudeSessions.turn")(function* (entry: Entry, request: Request, start: number) {
       const content = yield* Effect.try({
-        try: () => request.content(entry.id !== undefined),
+        try: () => request.sessionID ? CatchUp.content(request.prompt, start) : ConvertToClaudeMessage.utility(request.prompt),
         catch: (error) => error instanceof Error ? error : new Error(String(error)),
       })
-      yield* attempt(() => process.send(content, request.emit)).pipe(
+      // A rejected rebuild must not leave an empty process paired with the old durable record.
+      const process = yield* open(entry, request)
+      const userID = crypto.randomUUID()
+      const reply: LanguageModelV3TextPart[] = []
+      const seen = new Set<string>()
+      let messageID: string | undefined
+      let completed = false
+      const emit = (message: SDKMessage) => {
+        if (message.type === "assistant" && message.parent_tool_use_id === null && !seen.has(message.uuid)) {
+          seen.add(message.uuid)
+          messageID = message.uuid
+          for (const part of message.message.content) {
+            if (part.type === "text") reply.push({ type: "text", text: part.text })
+          }
+        }
+        if (message.type === "result") completed = true
+        request.emit(message)
+      }
+      yield* attempt(() => process.send(content, emit, userID)).pipe(
         // Stream cancellation interrupts the producer, but its finalizer keeps reading until the result.
         Effect.ensuring(attempt(() => process.interrupt()).pipe(Effect.orDie)),
         Effect.ensuring(Effect.gen(function* () {
           if (request.sessionID && process.persisted) {
-            entry.id = process.id
-            yield* records.set(request.sessionID, { claudeSessionID: entry.id })
+            const history: SessionRecord.Checkpoint[] = []
+            if (completed) {
+              const groups = Fingerprint.groups(request.prompt)
+              for (let i = 0; i < groups.length; i++) {
+                const group = groups[i]!
+                const previous = entry.record?.history?.[i]
+                let claudeMessageID: string | undefined
+                if (previous?.hash === group.hash) claudeMessageID = previous.claudeMessageID
+                if (i === groups.length - 1) claudeMessageID = userID
+                history.push({ hash: group.hash, claudeMessageID })
+              }
+              if (reply.length > 0) {
+                history.push({ hash: Fingerprint.groups([{ role: "assistant", content: reply }])[0]!.hash, claudeMessageID: messageID })
+              }
+            }
+            entry.record = { claudeSessionID: process.id, history: completed ? history : undefined }
+            yield* records.set(request.sessionID, entry.record)
           }
         })),
       )
@@ -174,8 +207,22 @@ export function registry() {
           current.idle = undefined
         }
         current.active = yield* Effect.withFiber(Effect.succeed)
-        const process = yield* open(current, request)
-        yield* turn(current, process, request)
+        let start = 0
+        if (request.sessionID) {
+          current.record ??= yield* records.get(request.sessionID)
+          const decision = SyncDecision.decide(request.prompt, current.record)
+          start = decision.start
+          if (decision.kind === "fresh" || decision.kind === "changed") {
+            yield* stop(current)
+            current.record = undefined
+          } else if ((!current.process || current.process.ended) && current.record
+            && !(yield* attempt(() => input.io.sessionExists(current.record!.claudeSessionID)))) {
+            yield* stop(current)
+            current.record = undefined
+            start = 0
+          }
+        }
+        yield* turn(current, request, start)
       }).pipe(Effect.ensuring(release(current, request))))
     })
     return { run } satisfies Interface

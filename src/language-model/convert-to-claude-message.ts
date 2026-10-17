@@ -14,15 +14,6 @@ export function utility(prompt: LanguageModelV3Prompt): ContentBlockParam[] {
   return blocks
 }
 
-// Phase 2 handles ordinary consecutive turns. Phase 3 replaces this selection with history reconciliation.
-export function latest(prompt: LanguageModelV3Prompt): ContentBlockParam[] {
-  let start = 0
-  for (let i = 0; i < prompt.length; i++) {
-    if (prompt[i]!.role === "assistant" || prompt[i]!.role === "tool") start = i + 1
-  }
-  return content(prompt.slice(start))
-}
-
 // A fresh/throwaway query has no history. Preserve roles as text, and attachments as real content blocks.
 export function content(prompt: LanguageModelV3Prompt): ContentBlockParam[] {
   const blocks: ContentBlockParam[] = []
@@ -33,7 +24,10 @@ export function content(prompt: LanguageModelV3Prompt): ContentBlockParam[] {
     for (const part of message.content) {
       if (part.type === "text") blocks.push({ type: "text", text: part.text })
       else if (part.type === "file") blocks.push(file(part))
-      else if (part.type !== "reasoning") throw new Error("Claude Code tool history is not supported yet")
+      else if (part.type === "tool-call") blocks.push({ type: "text", text: `<tool-call>\n${JSON.stringify({ id: part.toolCallId, name: part.toolName, input: part.input })}\n</tool-call>` })
+      else if (part.type === "tool-result") {
+        blocks.push({ type: "text", text: `<tool-result>\n${JSON.stringify({ id: part.toolCallId, name: part.toolName, output: part.output })}\n</tool-result>` })
+      }
     }
     if (history) blocks.push({ type: "text", text: `</${message.role}>` })
   }

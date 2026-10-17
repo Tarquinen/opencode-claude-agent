@@ -67,10 +67,12 @@ const claude = FakeClaude.make([
 - It keeps everything the SDK sent (flags, environment, start-up request, user messages, answers), so tests check both directions.
 - A test fails if a step is unfinished, including a requested step whose reply is still held back, or if the SDK writes something the script didn't expect. A test that deliberately interrupts a held reply checks that it is unfinished and that the process closes.
 - Tests wait on the fake's steps (`claude.started(step)` before a held reply, `claude.reached(step)` after it finishes), never on time. Each run also exposes `closed` to check cleanup. Changes the plugin then makes inside opencode in the background (a new model list, a connection problem) are awaited by checking again every few milliseconds until they show (`TestOpenCode.waitUntil`), as opencode's own tests do.
-- Recorded control-response IDs are remapped to the SDK's current request IDs.
+- Recorded control-response IDs are remapped to the SDK's current request IDs, and session IDs to the process's actual session/resume ID. Transcript message UUIDs remain those in the recording.
 - `expectInterrupt({ beforeResult })` can hold the final result after acknowledging an interrupt. Real Claude does this, so cancellation tests check that the next turn waits for the result. `hold` can delay the whole interrupt reply to test a new request arriving during idle shutdown.
 
 Branching and deleting Claude sessions (`forkSession`, `deleteSession`) work on Claude's session files directly (`sdk.d.ts:840-866`), not through `claude`. Phase 5 adds them to `ClaudeIO` (below), with a small in-memory version for level 2 and 3 tests.
+
+The existing `ClaudeIO.sessionExists` uses SDK `getSessionInfo`; the fake defaults to a present transcript and lets a test report one missing. This tests rebuilds without inventing a CLI error protocol.
 
 ## Level 3: inside opencode
 
@@ -90,7 +92,7 @@ await oc.session.wait({ sessionID: session.id })
 const { messages } = await oc.session.export({ sessionID: session.id })
 ```
 
-In phase 3, `test/lib/test-plugin.ts` will add:
+`test/lib/test-plugin.ts` provides:
 
 - **A scripted "normal" model.** A provider whose model is a hand-written `LanguageModelV3` that replies from a list, like the one in `packages/core/test/aisdk.test.ts:43-74`. Used for switching tests. opencode's `TestLLM` can't be used, because it replaces every model, ours included.
 - **A test tool** with a fixed result, and a `context` hook that can edit history when a test asks it to.
@@ -102,6 +104,10 @@ Tests check what opencode saved, what the fake received, and what our plugin sto
 ## Level 4: live
 
 The model/session harness and the level 3 setup with the real `ClaudeIO` and Haiku. Phase 2's chat test runs the actual model through text, resume, cancellation/recovery, attachments and a utility call whose instructions come from the request's system message, plus one Sonnet turn for thinking, since Haiku doesn't think by default; the embedded offline test separately verifies OpenCode's database-backed restart and request headers.
+
+`test/live/sync.test.ts` supplies other-model/tool history, checks all markers after incremental catch-up, deletes its own stopped Claude transcript, then verifies a full-history rebuild after rejecting an unsupported attachment. It also checks that stored boundary UUIDs occur in the real transcript. `test/recordings/sync.jsonl` (Claude Code 2.1.302, SDK 0.3.301) replays those responses offline. The embedded switching test separately runs a scripted model and a real OpenCode tool through `session.switchModel`.
+
+Refresh only that recording with `CLAUDE_LIVE=1 RECORD=1 bun test test/live/sync.test.ts`. Live chat tests retain the complete delivered history, including partial cancelled replies; cleanup tracks every created Claude ID, including replacements.
 
 Rules:
 
@@ -204,7 +210,7 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | One process per session, and an old process stopping never closes its replacement | 2 | 2 |
 | A plugin reload keeps live sessions, and waiting tool calls once tools exist | 2 | 2, 4 |
 | Cancelling before initialization closes the process without saving a nonexistent session; chat rejects an incompatible CLI before sending user input | 2 | 2 |
-| Text cancellation drains the result, then another turn can use the same process | 2, 4 | 2 |
+| Text cancellation drains before the next turn; if the saved partial reply differs from Claude's transcript, reconciliation rebuilds | 2, 4 | 2, 3 |
 | Idle shutdown and server restart resume the saved Claude ID; OpenCode persists the reply and token counts | 2, 3, 4 | 2 |
 | Chat keeps the Claude Code preset and host note; changes to opencode's built-in system prompt do not replace it or restart the session | 2 | 2 |
 | Titles, compaction and generate use independent, non-persistent processes and preserve their task instructions in the user message | 2, 4 | 2 |
@@ -213,8 +219,11 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | Switching model restarts the process and resumes the same Claude session | 2 | 2 |
 | Text stays verbatim; image and PDF inputs reach Claude as real content blocks | 1, 2, 4 | 2 |
 | A resumed turn preserves the whole newest user group; utility requests preserve instructions and history roles; unsupported media reports a clear error | 1 | 2 |
-| Switching to another model and back sends only the missed turns, then resumes normally | 3 | 3 |
-| Each of the four sync decisions, with case 3 using a fresh-session fallback until phase 5; edited replies, reordered user messages and a missing Claude session, plus edited tool results and tool images once tools exist | 1, 3 | 3, 4 |
+| Switching to another model and back catches up only missed text/tool history, then resumes normally | 2, 3, 4 | 3 |
+| Each of the four sync decisions, with case 3 using a fresh-session fallback until phase 5; edited/shortened history, reordered user groups, edited tool results and tool images | 1, 3 | 3 |
+| A missing Claude transcript rebuilds from the full authoritative history; phase-2 records without fingerprints also rebuild | 1, 2, 4 | 3 |
+| A rejected attachment during rebuild leaves the corrected request able to recover the full history | 2, 4 | 3 |
+| Reply metadata survives OpenCode persistence; saved catch-up boundaries use real Claude transcript UUIDs | 2, 3, 4 | 3 |
 | Several tool calls in one reply match the right IDs | 2 | 4 |
 | Cancelling during a tool call stops the handler, and Claude records the call as refused | 2 | 4 |
 | Cancelling between steps answers the waiting handler with opencode's saved result | 3 | 4 |
@@ -237,11 +246,11 @@ test/
 ├── lib/
 │   ├── effect.ts          it.effect / it.live helper
 │   ├── fake-claude.ts     The fake claude: script steps, replies, everything the SDK sent
-│   ├── fake-io.ts         ClaudeIO with the fake claude, plus in-memory session files from phase 5
+│   ├── fake-io.ts         Fake claude and saved-session lookup; in-memory fork/delete from phase 5
 │   ├── recorder.ts        RECORD=1: saves real claude traffic; loads recordings for the fake
-│   ├── opencode.ts        Starts opencode in the test with our plugin (and the test plugin from phase 3)
+│   ├── opencode.ts        Starts opencode in the test with our plugin and optional test plugins
 │   ├── sessions.ts        Model/session harness with isolated registry and storage
-│   └── test-plugin.ts     Phase 3: scripted "normal" model, test tool, history-editing hook
+│   └── test-plugin.ts     Scripted "normal" model, test tool, history-editing hook
 ├── bin/
 │   └── claude             The fake as a real executable, for the packaging check
 ├── recordings/            Real runs, one file per scenario

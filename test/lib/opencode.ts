@@ -1,6 +1,7 @@
 export * as TestOpenCode from "./opencode.js"
 
 import { Integration } from "@opencode/plugin/effect"
+import type { Plugin } from "@opencode/plugin/effect/plugin"
 import { OpenCode } from "@opencode/sdk/effect"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -27,6 +28,7 @@ export const start = Effect.fn("TestOpenCode.start")(function* (input: {
   readonly directory?: string
   readonly database?: string
   readonly registry?: ClaudeSessions.Registry
+  readonly plugins?: readonly Plugin[]
 }) {
   const directory = input.directory ?? (yield* tempDirectory)
   const opencode = yield* OpenCode.create({
@@ -34,7 +36,7 @@ export const start = Effect.fn("TestOpenCode.start")(function* (input: {
     config: { directory, project: false, content: "{}" },
     models: { fetch: false },
     fs: { filewatcher: false },
-    plugins: [make(input.io, input.registry)],
+    plugins: [make(input.io, input.registry), ...input.plugins ?? []],
   })
   // Listing models waits for plugins to finish loading
   yield* opencode.model.list()

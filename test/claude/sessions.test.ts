@@ -12,6 +12,30 @@ import { Recorder } from "../lib/recorder.js"
 const first = TestSessions.prompt("Remember the marker COPPER-OTTER. Reply only with that marker.")
 
 describe("Claude sessions", () => {
+  it.effect("rebuilds saved history when the local Claude transcript is missing", () => Effect.gen(function* () {
+    const claude = FakeClaude.make([FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt(),
+      FakeClaude.expectStartup(), FakeClaude.expectTurn({ index: 1 }), FakeClaude.expectInterrupt()])
+    const test = yield* TestSessions.start(claude)
+    yield* TestSessions.reply(test.model, first)
+    const before = test.storage.data.get("sessions/session-a") as { claudeSessionID: string }
+    yield* test.registry.close()
+    const registry = ClaudeSessions.registry()
+    yield* Effect.addFinalizer(() => registry.close())
+    const checked: string[] = []
+    const sessions = yield* registry.attach({ ...test.input, io: { ...test.input.io, sessionExists: async (id) => { checked.push(id); return false } } })
+    const model = yield* TestSessions.model(sessions)
+    expect(TestSessions.text(yield* TestSessions.reply(model, TestSessions.followup()))).toBe("COPPER-OTTER")
+    expect(checked).toEqual([before.claudeSessionID])
+    expect(claude.runs[1]!.args.some((arg) => arg.startsWith("--resume="))).toBe(false)
+    const user = claude.runs[1]!.received.find((message) => message.type === "user")
+    expect(JSON.stringify(user.message.content)).toContain("<conversation-checkpoint>")
+    expect(JSON.stringify(user.message.content)).toContain("COPPER-OTTER")
+    const after = test.storage.data.get("sessions/session-a") as { claudeSessionID: string }
+    expect(after.claudeSessionID).not.toBe(before.claudeSessionID)
+    yield* registry.close()
+    claude.check()
+  }))
+
   it.effect("streams consecutive turns once, on one process, with per-turn usage", () => Effect.gen(function* () {
     const claude = FakeClaude.make([FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectTurn({ index: 1 }), FakeClaude.expectInterrupt()])
     const test = yield* TestSessions.start(claude)
@@ -36,11 +60,36 @@ describe("Claude sessions", () => {
     claude.check()
   }))
 
+  it.effect("a rejected attachment during rebuild does not lose history on the corrected request", () => Effect.gen(function* () {
+    const claude = FakeClaude.make([FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt(),
+      FakeClaude.expectStartup(), FakeClaude.expectTurn({ index: 1 }), FakeClaude.expectInterrupt()])
+    const test = yield* TestSessions.start(claude)
+    yield* TestSessions.reply(test.model, first)
+    yield* test.registry.close()
+    const registry = ClaudeSessions.registry()
+    yield* Effect.addFinalizer(() => registry.close())
+    const sessions = yield* registry.attach({ ...test.input, io: { ...test.input.io, sessionExists: async () => false } })
+    const model = yield* TestSessions.model(sessions)
+    const prompt = TestSessions.followup("Inspect this image")
+    prompt.push({ role: "user", content: [{ type: "file", mediaType: "image/svg+xml", data: "PHN2Zy8+" }] })
+    const error = yield* TestSessions.reply(model, prompt).pipe(Effect.flip)
+    expect(String(error.cause)).toContain("Claude Code does not support image/svg+xml attachments")
+    yield* TestSessions.reply(model, TestSessions.followup())
+    expect(claude.runs).toHaveLength(2)
+    expect(claude.runs[1]!.args.some((arg) => arg.startsWith("--resume="))).toBe(false)
+    const user = claude.runs[1]!.received.find((message) => message.type === "user")
+    expect(JSON.stringify(user.message.content)).toContain("<conversation-checkpoint>")
+    expect(JSON.stringify(user.message.content)).toContain("COPPER-OTTER")
+    expect(JSON.stringify(user.message.content)).not.toContain("image/svg+xml")
+    yield* registry.close()
+    claude.check()
+  }))
+
   it.effect("cancellation drains past the interrupt receipt before accepting another turn", () => Effect.gen(function* () {
     const drain = Promise.withResolvers<void>()
     const interrupt = FakeClaude.expectInterrupt({ recording: "text-cancel", beforeResult: drain.promise })
     const claude = FakeClaude.make([FakeClaude.expectStartup(), FakeClaude.expectTurn({ recording: "text-cancel" }), interrupt,
-      FakeClaude.expectTurn({ recording: "text-cancel", index: 1 }), FakeClaude.expectInterrupt()])
+      FakeClaude.expectInterrupt(), FakeClaude.expectStartup(), FakeClaude.expectTurn({ recording: "text-cancel", index: 1 }), FakeClaude.expectInterrupt()])
     const test = yield* TestSessions.start(claude)
     const result = yield* TestSessions.stream(test.model, first)
     const reader = result.stream.getReader()
@@ -59,7 +108,9 @@ describe("Claude sessions", () => {
     drain.resolve()
     yield* Fiber.join(cancel)
     expect(TestSessions.text(yield* Fiber.join(next))).toBe("COPPER-OTTER")
-    expect(claude.runs).toHaveLength(1)
+    // The next authoritative history omits the cancelled animal list, so it must rebuild after draining.
+    expect(claude.runs).toHaveLength(2)
+    expect(claude.runs[1]!.args.some((arg) => arg.startsWith("--resume="))).toBe(false)
     yield* test.registry.close()
     claude.check()
   }))

@@ -3,17 +3,18 @@ import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { ConvertClaudeStream } from "../../src/language-model/convert-claude-stream.js"
 import { ConvertToClaudeMessage } from "../../src/language-model/convert-to-claude-message.js"
+import { CatchUp } from "../../src/sync/catch-up.js"
 import { Recorder } from "../lib/recorder.js"
 
 describe("Claude conversions", () => {
   test("a resumed turn keeps the whole newest user group and its attachments", () => {
-    const blocks = ConvertToClaudeMessage.latest([
+    const blocks = CatchUp.content([
       { role: "system", content: "Built-in agent instructions" },
       { role: "user", content: [{ type: "text", text: "Earlier question" }] },
       { role: "assistant", content: [{ type: "text", text: "Earlier reply" }] },
       { role: "user", content: [{ type: "text", text: "A plan-mode reminder" }] },
       { role: "user", content: [{ type: "text", text: "Inspect this image" }, { type: "file", mediaType: "image/png", data: "AQID" }] },
-    ])
+    ], 3)
     expect(blocks).toEqual([
       { type: "text", text: "A plan-mode reminder" },
       { type: "text", text: "Inspect this image" },

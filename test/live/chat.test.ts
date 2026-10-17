@@ -18,9 +18,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
     const storage = TestSessions.storage()
     let calls = 0
     yield* Effect.addFinalizer(() => Effect.promise(async () => {
-      for (const record of storage.data.values()) {
-        await deleteSession((record as { claudeSessionID: string }).claudeSessionID, { dir: directory })
-      }
+      for (const id of storage.ids) await deleteSession(id, { dir: directory })
       console.log(`Live chat model calls: ${calls}`)
     }))
 
@@ -41,23 +39,32 @@ describe.skipIf(!live)("chat against real Claude", () => {
       const finish = parts.find((part) => part.type === "finish")
       expect(finish?.usage.outputTokens.total).toBeGreaterThan(0)
       expect(finish?.usage.inputTokens.total).toBeGreaterThan(0)
-      return TestSessions.text(parts)
+      const text = TestSessions.text(parts)
+      prompt.push({ role: "assistant", content: [{ type: "text", text }] })
+      return text
     })
+
+    const history = TestSessions.prompt("Remember the marker COPPER-OTTER. Reply only with that marker.")
+    const next = (text: string) => {
+      history.push({ role: "user", content: [{ type: "text", text }] })
+      return history
+    }
 
     yield* Effect.gen(function* () {
       const model = yield* start("text")
-      expect(yield* reply(model, TestSessions.prompt("Remember the marker COPPER-OTTER. Reply only with that marker."))).toContain("COPPER-OTTER")
-      expect(yield* reply(model, TestSessions.followup())).toContain("COPPER-OTTER")
+      expect(yield* reply(model, history)).toContain("COPPER-OTTER")
+      expect(yield* reply(model, next("What was the marker? Reply only with it."))).toContain("COPPER-OTTER")
     }).pipe(Effect.scoped)
 
     yield* Effect.gen(function* () {
       const model = yield* start("text-resume")
-      expect(yield* reply(model, TestSessions.followup("What marker did I give you earlier? Reply only with it."))).toContain("COPPER-OTTER")
+      expect(yield* reply(model, next("What marker did I give you earlier? Reply only with it."))).toContain("COPPER-OTTER")
+      expect(storage.ids.size).toBe(1)
     }).pipe(Effect.scoped)
 
     yield* Effect.gen(function* () {
       const model = yield* start("text-cancel")
-      const result = yield* TestSessions.stream(model, TestSessions.followup("Write a very long numbered list of 500 different animal names. Start immediately."))
+      const result = yield* TestSessions.stream(model, next("Write a very long numbered list of 500 different animal names. Start immediately."))
       calls++
       const reader = result.stream.getReader()
       yield* Effect.promise(async () => {
@@ -65,11 +72,14 @@ describe.skipIf(!live)("chat against real Claude", () => {
           const part = await reader.read()
           if (part.done) throw new Error("Reply ended before cancellation could be tested")
           if (part.value.type === "error") throw part.value.error
-          if (part.value.type === "text-delta") break
+          if (part.value.type === "text-delta") {
+            history.push({ role: "assistant", content: [{ type: "text", text: part.value.delta }] })
+            break
+          }
         }
         await reader.cancel()
       })
-      expect(yield* reply(model, TestSessions.followup("Stop the list. Reply only with the marker I gave you earlier."))).toContain("COPPER-OTTER")
+      expect(yield* reply(model, next("Stop the list. Reply only with the marker I gave you earlier."))).toContain("COPPER-OTTER")
     }).pipe(Effect.scoped)
 
     yield* Effect.gen(function* () {

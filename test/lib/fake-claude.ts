@@ -144,7 +144,8 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
       for (const reply of replies(step, message.request_id)) {
         if (reply.type === "result" && step.beforeResult) await Promise.race([step.beforeResult, closed])
         if (process.exitCode !== null || process.signalCode !== null) return
-        process.stdout.write(JSON.stringify(reply) + "\n")
+        const sessionID = run.args.find((arg) => arg.startsWith("--session-id=") || arg.startsWith("--resume="))?.split("=")[1]
+        process.stdout.write(JSON.stringify(sessionID && "session_id" in reply ? { ...reply, session_id: sessionID } : reply) + "\n")
       }
     }
     completed++

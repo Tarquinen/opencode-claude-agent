@@ -3,7 +3,6 @@ export * as ClaudeCodeLanguageModel from "./claude-code-language-model.js"
 import type { LanguageModelV3, LanguageModelV3CallOptions, LanguageModelV3StreamResult } from "@ai-sdk/provider"
 import type { ClaudeSessions } from "../claude/sessions.js"
 import { ConvertClaudeStream } from "./convert-claude-stream.js"
-import { ConvertToClaudeMessage } from "./convert-to-claude-message.js"
 import { RequestKind } from "./request-kind.js"
 import { ClaudeSystemPrompt } from "./system-prompt.js"
 
@@ -41,11 +40,7 @@ export class Model implements LanguageModelV3 {
           sessionID: primary ? headers.get(RequestKind.SESSION_HEADER) ?? undefined : undefined,
           model: this.modelId,
           system: primary ? ClaudeSystemPrompt.primary : ClaudeSystemPrompt.utility,
-          content: (resume) => {
-            if (!primary) return ConvertToClaudeMessage.utility(options.prompt)
-            if (resume) return ConvertToClaudeMessage.latest(options.prompt)
-            return ConvertToClaudeMessage.content(options.prompt)
-          },
+          prompt: options.prompt,
           emit: (message) => {
             if (cancelled) return
             for (const part of convert(message)) controller.enqueue(part)

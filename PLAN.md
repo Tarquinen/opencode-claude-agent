@@ -150,9 +150,11 @@ The catch-up is one user message wrapped in a tag, in the style of opencode's `<
 For each opencode session, plugin storage keeps:
 
 - the Claude session ID
-- a fingerprint of each message Claude has already seen, with Claude's message ID at that point
+- fingerprints of the visible message groups Claude has already seen, with transcript message IDs at known boundaries
 
-A fingerprint covers what the model can see: each message's role, its text, and its tool calls (name, ID and input) and tool results. It leaves out thinking and provider metadata, because opencode sends those differently depending on which model a message goes to (`to-llm-message.ts:153-233`). opencode never sends message IDs or timestamps to the model, but tool call IDs come through unchanged (`aisdk.ts:541-625`).
+The history field is separate from the session ID. A phase-2 record has no verified fingerprints and is rebuilt once. Catch-up can put several OpenCode messages into one Claude user message, so its interior messages have fingerprints but no independent Claude boundary; only the end of the catch-up/current user group gets that user message's UUID.
+
+A fingerprint covers what the model can see: each message's role, its text, attachments, and its tool calls (name, ID and input) and tool results. It leaves out thinking and provider metadata, because opencode sends those differently depending on which model a message goes to (`to-llm-message.ts:153-233`). opencode never sends message IDs or timestamps to the model, but tool call IDs come through unchanged (`aisdk.ts:541-625`).
 
 A run of back-to-back user messages is compared as a group, ignoring their order. opencode can add notes, such as Plan mode reminders, just before the latest user message (`packages/core/src/plugin/plan.ts:55-72`), and they don't always end up in the same spot.
 
@@ -170,8 +172,12 @@ Before every main model call, the plugin compares the request's messages with th
 
 1. **In sync.** Send only the new user message, or the tool results Claude is waiting on.
 2. **Other models added turns** (for example Claude → GPT → Claude). Resume the Claude session and send a catch-up of only the new turns. Claude keeps its real memory of its own turns, and its cache stays warm.
-3. **Earlier history changed or got shorter** (undo, edit, fork, compaction, or a plugin editing earlier messages). Branch Claude's session at the last matching message with `forkSession(sessionId, { upToMessageId })` (`sdk.d.ts:854`), resume the branch, and save its new session ID in the record. Then continue as in case 1 or 2. Branching never changes the old session, so a rewind can't leave Claude on the wrong branch.
+3. **Earlier history changed or got shorter** (undo, edit, fork, compaction, or a plugin editing earlier messages). Branch Claude's session at the last matching message with `forkSession(sessionId, { upToMessageId })` (`sdk.d.ts:854`), resume the branch, and save its new session ID in the record. The SDK remaps every message UUID when forking, so refresh saved boundary IDs from the forked transcript rather than carrying over the old UUIDs. Then continue as in case 1 or 2. Branching never changes the old session, so a rewind can't leave Claude on the wrong branch.
 4. **Nothing matches.** Start a new Claude session with a catch-up of the whole history.
+
+Before reopening a saved session, `ClaudeIO.sessionExists` checks the documented SDK `getSessionInfo` lookup. A missing local transcript also takes case 4. This handles transferred sessions without parsing CLI error strings or retrying arbitrary failures.
+
+Convert the prompt before opening a process. A rejected attachment must not leave a fresh process paired with an older saved record on the next request.
 
 Case 4 is always safe. Cases 1–3 save tokens and keep Claude's memory intact. If anything looks wrong, fall back to case 4.
 
@@ -314,7 +320,7 @@ These opencode features won't work with Claude Code models:
 
 ## Open questions
 
-- **Catch-up messages.** Does Claude pick up a catch-up message well, treating it as the conversation so far and carrying on naturally? To be tested in phase 3, and the format adjusted if needed.
+- **Catch-up messages.** The phase-3 live test verifies marker recall from another model and a tool result, including a full rebuild after deleting the local transcript. Tool-heavy histories will get broader coverage with the phase-4 bridge.
 - **Resuming while a tool call waits.** If the `claude` process closes while Claude waits on tool results (idle shutdown or an opencode restart), can we `resume` and send the results as `tool_result` blocks in the next user message? If not, they go in a tagged text message holding the full results, followed by any user messages that arrived since.
 
 ## Code structure
@@ -345,7 +351,7 @@ opencode-claude-code/
 │   │   └── session.ts      ctx.session: tags side calls, stops opencode's retries
 │   │
 │   ├── claude/             The only code that starts or talks to Claude Code
-│   │   ├── io.ts           Starting claude and Claude's session files (fork, delete). Tests swap it
+│   │   ├── io.ts           Starting claude and checking saved sessions; fork/delete in phase 5. Tests swap it
 │   │   ├── query-options.ts  Shared settings: user's binary, everything we turn off, permissions
 │   │   ├── status.ts       The login check's latest result, shared by every feature
 │   │   ├── session.ts      One Claude process: input queue, single reader, interrupt, drain, close
@@ -357,7 +363,7 @@ opencode-claude-code/
 │   │   ├── claude-code-language-model.ts  doStream: select chat or side-call prompt, run the request, stream back
 │   │   ├── request-kind.ts                Request kind and session headers
 │   │   ├── system-prompt.ts               Claude Code preset for chat; small fixed prompt for side calls
-│   │   ├── convert-to-claude-message.ts   opencode prompt → Claude message (text, images, PDFs)
+│   │   ├── convert-to-claude-message.ts   opencode prompt → Claude message (text, tool history, images, PDFs)
 │   │   ├── convert-claude-stream.ts       Claude messages → opencode stream (text, thinking, tools)
 │   │   ├── usage.ts                       Token counts per API message, without double counting
 │   │   ├── map-claude-finish-reason.ts
@@ -484,7 +490,7 @@ A phase is done when its tests and its cases in TESTING.md pass, its "done when"
 
 Chat uses the Claude Code preset plus an OpenCode runtime note. Titles and other side calls use isolated, non-persistent queries and carry their task instructions in an `<instructions>` user-message block. The registry owns all processes, including running side calls. Disable opencode's outer retries here: Claude Code already retries API failures, and replaying a completed, failed turn repeats permanent errors too.
 
-**Scope:** resumed primary sessions receive only the newest user group. Phase 3 adds history reconciliation, catch-up from another model (including tool history), and recovery when Claude's saved session is missing. Until then, tool history is unsupported and a missing saved session fails rather than silently losing history. Model or effective Claude system-prompt changes restart with resume. Tool guidance comes in phase 4; compaction/generate branches in phase 5; custom roles, project instructions and live model controls in phase 6. Prompt compatibility experiments are documented in [TESTING.md](TESTING.md#system-prompt-compatibility).
+**Scope:** model or effective Claude system-prompt changes restart with resume. History reconciliation belongs to phase 3; tool guidance to phase 4; compaction/generate branches to phase 5; custom roles, project instructions and live model controls to phase 6. Prompt compatibility experiments are documented in [TESTING.md](TESTING.md#system-prompt-compatibility).
 
 **Done when:** a conversation in the TUI works across several turns and after restarting opencode, cancelling leaves a usable session, and token counts and context size show correctly.
 

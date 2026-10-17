@@ -2,7 +2,13 @@ export * as SessionRecord from "./record.js"
 
 import { Effect, Option, Schema } from "effect"
 
-const Record = Schema.Struct({ claudeSessionID: Schema.String })
+const Checkpoint = Schema.Struct({ hash: Schema.String, claudeMessageID: Schema.optional(Schema.String) })
+export type Checkpoint = typeof Checkpoint.Type
+const Record = Schema.Struct({
+  claudeSessionID: Schema.String,
+  // An ID can be durable before a turn is fully synchronized. Old phase-2 records have no history.
+  history: Schema.optional(Schema.Array(Checkpoint)),
+})
 export type Record = typeof Record.Type
 
 export interface Storage {

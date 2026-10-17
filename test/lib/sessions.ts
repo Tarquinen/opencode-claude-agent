@@ -5,15 +5,17 @@ import { Effect } from "effect"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
 import { ClaudeCodeLanguageModel } from "../../src/language-model/claude-code-language-model.js"
 import { RequestKind } from "../../src/language-model/request-kind.js"
+import type { SessionRecord } from "../../src/sync/record.js"
 import { FakeClaude } from "./fake-claude.js"
 import { FakeIO } from "./fake-io.js"
 
 export function storage() {
   const data = new Map<string, unknown>()
+  const ids = new Set<string>()
   return {
-    data,
+    data, ids,
     get: (key: string) => Effect.sync(() => data.get(key)),
-    set: (key: string, value: unknown) => Effect.sync(() => { data.set(key, value) }),
+    set: (key: string, value: SessionRecord.Record) => Effect.sync(() => { data.set(key, value); ids.add(value.claudeSessionID) }),
   }
 }
 

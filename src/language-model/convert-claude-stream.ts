@@ -9,6 +9,7 @@ export function make() {
   const streamed = new Set<string>()
   const blocks = new Map<number, "text" | "reasoning">()
   let messageID = ""
+  let metadata: { "claude-code": { sessionID: string; messageID: string } } | undefined
 
   return (message: SDKMessage): LanguageModelV3StreamPart[] => {
     const parts: LanguageModelV3StreamPart[] = []
@@ -17,6 +18,7 @@ export function make() {
       switch (event.type) {
         case "message_start":
           messageID = event.message.id
+          metadata = undefined
           streamed.add(messageID)
           usage.update(messageID, event.message.usage)
           parts.push({ type: "response-metadata", id: messageID, modelId: event.message.model })
@@ -40,7 +42,7 @@ export function make() {
         }
         case "content_block_stop": {
           const kind = blocks.get(event.index)
-          if (kind) parts.push({ type: `${kind}-end`, id: `${messageID}:${event.index}` })
+          if (kind) parts.push({ type: `${kind}-end`, id: `${messageID}:${event.index}`, providerMetadata: metadata })
           blocks.delete(event.index)
           break
         }
@@ -50,13 +52,15 @@ export function make() {
       }
     }
     if (message.type === "assistant" && message.parent_tool_use_id === null) {
+      // The complete block carries the transcript UUID, unlike the API message ID on stream events.
+      metadata = { "claude-code": { sessionID: message.session_id, messageID: message.uuid } }
       usage.update(message.message.id, message.message.usage)
       // Complete assistant blocks repeat the streamed content. Only use them when no stream was sent.
       if (!streamed.has(message.message.id)) {
         for (let i = 0; i < message.message.content.length; i++) {
           const block = message.message.content[i]!
           const id = `${message.uuid}:${i}`
-          if (block.type === "text") parts.push({ type: "text-start", id }, { type: "text-delta", id, delta: block.text }, { type: "text-end", id })
+          if (block.type === "text") parts.push({ type: "text-start", id }, { type: "text-delta", id, delta: block.text }, { type: "text-end", id, providerMetadata: metadata })
           if (block.type === "thinking") parts.push({ type: "reasoning-start", id }, { type: "reasoning-delta", id, delta: block.thinking }, { type: "reasoning-end", id })
         }
       }

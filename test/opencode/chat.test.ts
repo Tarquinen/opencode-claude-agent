@@ -84,6 +84,9 @@ describe("embedded text chat", () => {
       const history = yield* test.opencode.session.export({ sessionID })
       const assistants = history.messages.filter((message) => message.type === "assistant")
       expect(assistants).toHaveLength(3)
+      expect(assistants[0]!.content).toContainEqual(expect.objectContaining({
+        type: "text", state: { sessionID: id, messageID: "f4abc1c4-72af-43cc-9dc4-d9707f87aa5a" },
+      }))
       expect(assistants.at(-1)!.content).toContainEqual(expect.objectContaining({ type: "text", text: "COPPER-OTTER" }))
       const run = claude.runs.filter((run) => run.args.includes("--include-partial-messages")).at(-1)!
       expect(run.args).toContain(`--resume=${id}`)
