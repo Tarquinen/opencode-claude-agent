@@ -3,6 +3,8 @@ import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { ConvertClaudeStream } from "../../src/language-model/convert-claude-stream.js"
 import { ConvertToClaudeMessage } from "../../src/language-model/convert-to-claude-message.js"
+import { ClaudeSystemPrompt } from "../../src/language-model/system-prompt.js"
+import type { LanguageModelV3Prompt } from "@ai-sdk/provider"
 import { CatchUp } from "../../src/sync/catch-up.js"
 import { Recorder } from "../lib/recorder.js"
 
@@ -22,16 +24,16 @@ describe("Claude conversions", () => {
     ])
   })
 
-  test("utility calls preserve task instructions and history roles, but omit thinking", () => {
-    const blocks = ConvertToClaudeMessage.utility([
+  test("utility calls keep system instructions separate from conversation content and omit thinking", () => {
+    const prompt: LanguageModelV3Prompt = [
       { role: "system", content: "Summarize this conversation." },
       { role: "system", content: "Use one sentence." },
       { role: "user", content: [{ type: "text", text: "First question" }] },
       { role: "assistant", content: [{ type: "reasoning", text: "Private reasoning" }, { type: "text", text: "First answer" }] },
       { role: "user", content: [{ type: "text", text: "Follow-up" }] },
-    ])
-    expect(blocks).toEqual([
-      { type: "text", text: "<instructions>\nSummarize this conversation.\n\nUse one sentence.\n</instructions>" },
+    ]
+    expect(ClaudeSystemPrompt.utility(prompt)).toBe("Summarize this conversation.\n\nUse one sentence.")
+    expect(ConvertToClaudeMessage.content(prompt)).toEqual([
       { type: "text", text: "<user>" }, { type: "text", text: "First question" }, { type: "text", text: "</user>" },
       { type: "text", text: "<assistant>" }, { type: "text", text: "First answer" }, { type: "text", text: "</assistant>" },
       { type: "text", text: "<user>" }, { type: "text", text: "Follow-up" }, { type: "text", text: "</user>" },

@@ -4,8 +4,10 @@ import { query, type Options, type SDKMessage, type SDKResultMessage, type SDKUs
 import { ClaudeProbe } from "./probe.js"
 
 interface Turn {
-  readonly emit: (message: SDKMessage) => void
   readonly result: PromiseWithResolvers<SDKResultMessage>
+  readonly messages: SDKMessage[]
+  wake?: () => void
+  finished: boolean
 }
 
 export type Interface = ReturnType<typeof start>
@@ -30,11 +32,15 @@ export function start(options: Options) {
   const pump = (async () => {
     try {
       for await (const message of session) {
-        turn?.emit(message)
+        if (turn) {
+          turn.messages.push(message)
+          turn.wake?.()
+        }
+        if (message.type === "assistant") persisted = true
         if (message.type === "result") {
           persisted = true
+          if (turn) turn.finished = true
           turn?.result.resolve(message)
-          turn = undefined
         }
       }
     } catch (error) {
@@ -42,13 +48,13 @@ export function start(options: Options) {
     } finally {
       ended = true
       turn?.result.reject(failure ?? new Error("Claude Code stopped before finishing its reply"))
-      turn = undefined
+      turn?.wake?.()
     }
   })()
 
   async function interrupt() {
     const active = turn
-    if (!active) return
+    if (!active || active.finished) return
     await session.interrupt()
     // The interrupt receipt precedes the result and transcript flush. Do not send another turn yet.
     await active.result.promise
@@ -58,7 +64,10 @@ export function start(options: Options) {
     if (stopping) return stopping
     stopping = (async () => {
       try {
-        if (initialized && !ended) await session.interrupt()
+        if (initialized && !ended) {
+          await session.interrupt()
+          if (turn && !turn.finished) await turn.result.promise
+        }
         input.close()
         // An uninitialized process has no conversation to flush.
         if (!initialized) session.close()
@@ -70,18 +79,50 @@ export function start(options: Options) {
     return stopping
   }
 
+  function begin(content: SDKUserMessage["message"]["content"], uuid = crypto.randomUUID()) {
+    if (ended || stopping) throw failure ?? new Error("Claude Code session has stopped")
+    if (turn && !turn.finished) throw new Error("Claude Code is still finishing the previous turn")
+    const result = Promise.withResolvers<SDKResultMessage>()
+    // The reader reports process failures too; this promise is also used by interrupt-and-drain.
+    void result.promise.catch(() => {})
+    turn = { result, messages: [], finished: false }
+    input.enqueue({ type: "user", uuid, message: { role: "user", content }, parent_tool_use_id: null })
+  }
+
+  async function read(emit: (message: SDKMessage) => void, step: boolean): Promise<SDKResultMessage | "tools"> {
+    const active = turn
+    if (!active) throw new Error("No Claude turn to read")
+    let tools = false
+    for (;;) {
+      const message = active.messages.shift()
+      if (!message) {
+        if (ended) throw failure ?? new Error("Claude Code stopped before finishing its reply")
+        await new Promise<void>((resolve) => { active.wake = resolve })
+        continue
+      }
+      emit(message)
+      if (message.type === "assistant" && message.parent_tool_use_id === null) {
+        for (const part of message.message.content) if (part.type === "tool_use") tools = true
+      }
+      if (step && tools && message.type === "stream_event" && message.parent_tool_use_id === null && message.event.type === "message_stop") return "tools"
+      if (message.type === "result") return message
+    }
+  }
+
   return {
     id: options.resume ?? options.sessionId!,
     ready,
     get ended() { return ended },
     get persisted() { return persisted },
-    send(content: SDKUserMessage["message"]["content"], emit: Turn["emit"], uuid = crypto.randomUUID()) {
-      if (ended || stopping) throw failure ?? new Error("Claude Code session has stopped")
-      if (turn) throw new Error("Claude Code is still finishing the previous turn")
-      const result = Promise.withResolvers<SDKResultMessage>()
-      turn = { emit, result }
-      input.enqueue({ type: "user", uuid, message: { role: "user", content }, parent_tool_use_id: null })
-      return result.promise
+    get running() { return !!turn && !turn.finished },
+    begin,
+    readStep: (emit: (message: SDKMessage) => void) => read(emit, true),
+    async send(content: SDKUserMessage["message"]["content"], emit: (message: SDKMessage) => void, uuid = crypto.randomUUID()) {
+      begin(content, uuid)
+      return await read(emit, false) as SDKResultMessage
+    },
+    addUser(content: SDKUserMessage["message"]["content"], uuid: NonNullable<SDKUserMessage["uuid"]>) {
+      input.enqueue({ type: "user", uuid, priority: "next", message: { role: "user", content }, parent_tool_use_id: null })
     },
     interrupt,
     stop,

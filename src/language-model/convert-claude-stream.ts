@@ -1,14 +1,16 @@
 export * as ConvertClaudeStream from "./convert-claude-stream.js"
 
-import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
+import type { LanguageModelV3FunctionTool, LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { ClaudeUsage } from "./usage.js"
+import { ToolNames } from "../tools/names.js"
 
-export function make() {
+export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
   const usage = ClaudeUsage.make()
   const streamed = new Set<string>()
   const blocks = new Map<number, "text" | "reasoning">()
   let messageID = ""
+  let calledTools = false
   let metadata: { "claude-code": { sessionID: string; messageID: string } } | undefined
 
   return (message: SDKMessage): LanguageModelV3StreamPart[] => {
@@ -49,12 +51,20 @@ export function make() {
         case "message_delta":
           usage.update(messageID, event.usage)
           break
+        case "message_stop":
+          if (calledTools) parts.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage: usage.snapshot() })
+          break
       }
     }
     if (message.type === "assistant" && message.parent_tool_use_id === null) {
       // The complete block carries the transcript UUID, unlike the API message ID on stream events.
       metadata = { "claude-code": { sessionID: message.session_id, messageID: message.uuid } }
       usage.update(message.message.id, message.message.usage)
+      for (const block of message.message.content) {
+        if (block.type !== "tool_use") continue
+        calledTools = true
+        parts.push({ type: "tool-call", toolCallId: block.id, toolName: ToolNames.original(block.name, tools), input: JSON.stringify(block.input), providerMetadata: metadata })
+      }
       // Complete assistant blocks repeat the streamed content. Only use them when no stream was sent.
       if (!streamed.has(message.message.id)) {
         for (let i = 0; i < message.message.content.length; i++) {
@@ -71,7 +81,7 @@ export function make() {
         parts.push({ type: "error", error: new Error(text || "Claude Code could not finish its reply") })
         return parts
       }
-      usage.result(message.usage)
+      if (message.num_turns === 1) usage.result(message.usage)
       parts.push({
         type: "finish",
         finishReason: { unified: message.stop_reason === "max_tokens" ? "length" : "stop", raw: message.stop_reason ?? undefined },

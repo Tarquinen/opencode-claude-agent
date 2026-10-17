@@ -61,13 +61,14 @@ const claude = FakeClaude.make([
 ])
 ```
 
-- `expect...` steps check the kind of SDK input and replay the recorded replies up to the next input. Tests assert the actual prompt content separately. Phase 4 will add individual `send` and `ask` steps for hooks and tools.
+- `expect...` steps check the kind of SDK input and replay the recorded replies up to the next input. Tests assert the actual prompt content separately. `FakeClaude.replay` also scripts Claude-initiated hook and MCP exchanges.
 - The fake answers the start-up request with a recorded start-up reply.
 - Embedded chat tests use `FakeClaude.make(script, { probes: true })` to answer login probes independently. These are initialization requests from processes without `--include-partial-messages`; their incidental count/order is not part of the chat script. Dedicated login tests still script probes explicitly.
 - It keeps everything the SDK sent (flags, environment, start-up request, user messages, answers), so tests check both directions.
 - A test fails if a step is unfinished, including a requested step whose reply is still held back, or if the SDK writes something the script didn't expect. A test that deliberately interrupts a held reply checks that it is unfinished and that the process closes.
 - Tests wait on the fake's steps (`claude.started(step)` before a held reply, `claude.reached(step)` after it finishes), never on time. Each run also exposes `closed` to check cleanup. Changes the plugin then makes inside opencode in the background (a new model list, a connection problem) are awaited by checking again every few milliseconds until they show (`TestOpenCode.waitUntil`), as opencode's own tests do.
 - Recorded control-response IDs are remapped to the SDK's current request IDs, and session IDs to the process's actual session/resume ID. Transcript message UUIDs remain those in the recording.
+- `run.exit(code)` simulates an unexpected process exit, then yields one event-loop turn for the SDK to observe it. Recovery tests check that saved OpenCode tool results reach the replacement process.
 - `expectInterrupt({ beforeResult })` can hold the final result after acknowledging an interrupt. Real Claude does this, so cancellation tests check that the next turn waits for the result. `hold` can delay the whole interrupt reply to test a new request arriving during idle shutdown.
 
 Branching and deleting Claude sessions (`forkSession`, `deleteSession`) work on Claude's session files directly (`sdk.d.ts:840-866`), not through `claude`. Phase 5 adds them to `ClaudeIO` (below), with a small in-memory version for level 2 and 3 tests.
@@ -103,9 +104,13 @@ Tests check what opencode saved, what the fake received, and what our plugin sto
 
 ## Level 4: live
 
-The model/session harness and the level 3 setup with the real `ClaudeIO` and Haiku. Phase 2's chat test runs the actual model through text, resume, cancellation/recovery, attachments and a utility call whose instructions come from the request's system message, plus one Sonnet turn for thinking, since Haiku doesn't think by default; the embedded offline test separately verifies OpenCode's database-backed restart and request headers.
+The model/session harness and the level 3 setup with the real `ClaudeIO` and Haiku. Phase 2's chat test runs the actual model through text, resume, cancellation/recovery, attachments and a utility call whose instructions come from the request's system message, plus one Sonnet turn for thinking, since Haiku doesn't think by default; the embedded offline test separately verifies OpenCode's database-backed restart and request headers. The title regression reads the installed OpenCode title agent's real instructions and submits a conflicting file-edit request through our title side-call path. It checks a short, single-line title rather than an attempted edit or refusal. The utility test also uses a conflicting source request, rather than an innocuous title phrase.
 
 `test/live/sync.test.ts` supplies other-model/tool history, checks all markers after incremental catch-up, deletes its own stopped Claude transcript, then verifies a full-history rebuild after rejecting an unsupported attachment. It also checks that stored boundary UUIDs occur in the real transcript. `test/recordings/sync.jsonl` (Claude Code 2.1.302, SDK 0.3.301) replays those responses offline. The embedded switching test separately runs a scripted model and a real OpenCode tool through `session.switchModel`.
+
+Phase 4 adds recorded hook and MCP control exchanges. `FakeClaude.replay` replays those exchanges through the real SDK, including a handler that stays pending across OpenCode steps. `tools.jsonl` covers two calls in one reply and a second tool step; `tools-cancel.jsonl` covers cancellation after emitted calls but before the MCP handler starts, followed by a restart; `tools-waiting-cancel.jsonl` waits for actual handler entry, interrupts it, checks transcript refusals, and continues on the same process. The offline shutdown test combines that entered-handler cancellation with the recorded restart and holds the terminal result to verify draining before closure. `tools-continue.jsonl` covers steering alongside tool feedback without ending the active turn. `tools-abort.jsonl` covers OpenCode's typed aborted result: interrupt/drain, canonical results as catch-up, and a normal new user turn on the same process. Its offline test gates the terminal result to prove the next input waits for drain. `tools-media.jsonl` covers image/PDF results, a catalog-change restart, long names and denial. Old text recordings receive a connected-server status only when the SDK actually registers one; explicit failed statuses are preserved.
+
+`test/live/tools.test.ts` refreshes those recordings and verifies real transcript boundaries. PDF replacement is an array of Anthropic content blocks, not an MCP response envelope. Active-turn steering uses priority `next`; aborted-turn recovery must use normal user input after interrupt/drain. Both paths require the exact requested reply, with tool results separate from new user content. `test/live/opencode-tools.test.ts` runs real OpenCode read/edit tools against a temporary file, waits for an actual OpenCode approval, and verifies the file only changes after approval. It then rejects another edit without feedback (ending the OpenCode turn), sends a new user message, and requires the exact reply with no further tool calls or file changes. It also checks the SDK input uses a fresh turn. It captures only its own Claude session IDs for cleanup. `test/opencode/tools.test.ts` exercises both actual host interruption and plain rejection, proving the persisted aborted error reaches the bridge and causes interrupt/drain before new input. A separate rejection-with-feedback test checks ordinary errors still continue as MCP `isError: true`. The multiline namespace test verifies the complete Code Mode catalog reaches Claude.
 
 Refresh only that recording with `CLAUDE_LIVE=1 RECORD=1 bun test test/live/sync.test.ts`. Live chat tests retain the complete delivered history, including partial cancelled replies; cleanup tracks every created Claude ID, including replacements.
 
@@ -113,7 +118,7 @@ Rules:
 
 - Runs only when `CLAUDE_LIVE=1` is set, and is skipped if `claude` isn't logged in.
 - Never runs in CI.
-- Checks for marker words placed in prompts and tool results, never exact wording.
+- Uses marker membership for unconstrained prose. When a prompt explicitly asks for only a marker, compares the entire trimmed reply: quoting the marker in a refusal must fail. Titles use format/content constraints without prescribing exact wording.
 - Prints how many model calls it made.
 - Deletes the Claude sessions it created.
 - Uses its own attachment fixtures (`test/fixtures/red.png` and `marker.pdf`), with Claude sessions in a temporary folder. Regenerate those fixtures with `uv run --with reportlab python test/fixtures/create.py`.
@@ -130,6 +135,39 @@ Scenarios:
 8. An image attachment.
 9. A PDF from a tool result.
 10. A title.
+
+### Manual TUI acceptance
+
+On 2026-10-16, ran the installed OpenCode 2.0.32 TUI in tmux 3.7c with this checkout loaded as a plugin, Claude Code 2.1.302, SDK 0.3.301 and Haiku 5.5. Used a temporary project and isolated OpenCode config/database, with read/edit/shell permissions set to ask. All approvals, rejections, interruptions and model selections went through TUI keystrokes.
+
+- **Approval and rejection passed.** Read and edit each waited for approval. `marker.txt` stayed `OLD-OTTER` until the edit was approved, then became `APPROVED-OTTER`. Rejecting a subsequent edit left it unchanged.
+- **Tool interruption passed.** Ran `cat cancel.pipe` against a named pipe, confirmed the process was actually blocked, then pressed Escape twice. OpenCode showed `Tool execution interrupted`, and the child process exited. A fresh-session follow-up asking `2 + 2` returned `4`.
+- **Model switching passed.** Selected Big Pickle while `cat switch.pipe` was running, then released the pipe with `SWITCH-OTTER`. The TUI applied the new model to the next user turn; Big Pickle recalled the output and introduced `PICKLE-HERON`. After switching back, Claude recalled both markers and the approved file contents.
+- **Intermittent follow-up failure.** In the first session, after both a rejected edit and a cancelled shell call, Claude said the next user message came from tool output and ignored its instruction. The Claude transcript shows the input delivered through the SDK's `queued_command` attachment, with a rendered reminder identifying it as a new user message; it was not present in the tool-result content. Repeating cancellation and the same rejection/follow-up in a fresh session passed. Direct SDK controls below reproduced the failure without the bridge.
+- **Title prompt bug:** the first session title answered the file-edit request instead of naming the session; the fresh session received a correct title. Direct controls below confirmed that our utility conversion does not clearly separate the source conversation from task instructions.
+
+At the time of this initial TUI check, the live between-step test only checked marker membership, allowing a refusal that quoted the marker to pass. The follow-up tests now require the entire trimmed reply to match. The fixes below change the stopped-turn delivery path rather than relying on another successful sample of the old intermittent behavior.
+
+#### Investigation controls
+
+On 2026-10-16, used the installed Claude Code 2.1.302, SDK 0.3.301 and Haiku 5.5 directly, with the plugin's isolation options. Scripts and results are in `/tmp/opencode/claude-investigate-w3uXWI`. These are diagnostic experiments, not checked-in regression tests.
+
+- **Titles:** used OpenCode's actual title instructions and the original read/edit request. The old utility conversion failed all three trials: it answered the request or emitted malformed edit-like text instead of a title. Clearly delimiting the source conversation and restating the title task produced titles in all three controls. Putting the title instructions in the system prompt also passed all three controls. This identified a prompt-construction defect in our side-call path, not missing tool access.
+- **Queued follow-ups:** used SDK `query`, `createSdkMcpServer` and `tool` directly, without `ClaudeSessions`, `PendingTools`, hooks or the bridge server. An edit handler waited while a new user message was queued with `priority: "next"`, then returned a refusal. With the plugin's runtime/tool-routing prompt, two of four trials ignored the follow-up; one explicitly called it tool output. In every trial the refusal contained only the error, and a separate `queued_command` attachment carried the user message. Four bare-preset controls and three controls with prior successful read/edit history passed. This isolates an intermittent prompt/model interaction with Claude Code's mid-turn delivery; it does not establish which prompt wording causes it or a defect in tool-result conversion.
+- **Fresh-turn control:** with the same runtime/tool-routing prompt, interrupted and drained the waiting Claude turn before sending the follow-up as a normal user message on the same process. All four trials returned exactly `DENIAL-RECOVERED`. This motivated using a real new turn after an OpenCode cancellation/rejection. The regression tests below also verify preservation of OpenCode's canonical results and checkpoints.
+- **Assertion gap:** `.toContain(marker)` accepts the first TUI session's replies even though they explicitly ignored the marker instruction. Use an unambiguous expected response for this targeted instruction-following check; ordinary prose tests can still use marker membership.
+
+The checked-in title regression reproduced the original defect with a 328-character refusal. It now checks for a short single-line title within OpenCode's 100-character storage limit, rather than enforcing the prompt's advisory 50-character target exactly.
+
+#### Fixes
+
+- Side calls pass OpenCode's task instructions in the SDK system prompt and keep conversation source in user content. OpenCode still chooses the title agent/model and handles the result; primary chat still uses the Claude Code preset.
+- The existing context-hook error metadata also preserves OpenCode's structured `aborted` error. On the next request, a parked Claude turn is interrupted and drained before a normal new user turn begins. Canonical saved results use the existing catch-up path, and transcript checkpoints remain valid. Active-turn steering and ordinary tool errors keep the SDK's native continuation path.
+- Offline regressions check drain ordering and both real OpenCode interruption/rejection paths; live regressions check actual replies and wire-level fresh-turn delivery.
+
+#### Recheck after fixes
+
+Typecheck, all 63 offline tests and all 11 affected live chat/tool tests passed. Repeated the original TUI scenario in the same isolated project: the automatic title was `Edit marker.txt: OLD-OTTER to APPROVED-OTTER`; the approved edit succeeded; the rejected edit left the file unchanged; and the next reply was exactly `DENIAL-RECOVERED`. After interrupting a confirmed running `cat cancel.pipe` process, the next reply was exactly `CANCEL-RECOVERED`. The Claude transcript contains both follow-ups as normal user turns with the canonical stopped-tool results, and no queued-command attachments. TUI capture and filtered transcript are saved in `/tmp/opencode/claude-tui-PDuqdg/evidence/fixed-tui.txt` and `fixed-turns.jsonl`. Phase-4 acceptance is complete.
 
 ### System-prompt compatibility
 
@@ -149,7 +187,7 @@ Source review:
 
 `RECORD=1` wraps the real spawn function and saves every line in both directions, one file per scenario in `test/recordings/` (`test/lib/recorder.ts`). The start-up recordings (`startup`, `startup-logged-out`) come from a login check run on its own, so each file holds one complete `claude` run.
 
-Phase 2 adds `text` (two turns), `text-resume`, `text-cancel` (interrupt then recovery), `attachments`, `utility` (side-call instructions) and `thinking` (Claude Code hides Sonnet's thinking text by default, so it arrives empty). Each is one complete process. Chat recordings use the Claude Code preset and OpenCode runtime note; `utility` uses the small fixed system prompt. The thinking test is separate, so it can be recorded on its own with `-t thinking`. The live test regenerates these through the plugin model itself. Run recording and offline tests sequentially, since recording replaces fixtures. Usage assertions compare converted counts with the recorded terminal result, so re-recording does not require copying token totals into test code.
+Phase 2 adds `text` (two turns), `text-resume`, `text-cancel` (interrupt then recovery), `attachments`, `utility` (side-call instructions) and `thinking` (Claude Code hides Sonnet's thinking text by default, so it arrives empty). Each is one complete process. Chat recordings use the Claude Code preset and OpenCode runtime note; `utility` preserves the supplied task system prompt. The thinking test is separate, so it can be recorded on its own with `-t thinking`. The live test regenerates these through the plugin model itself. Run recording and offline tests sequentially, since recording replaces fixtures. Usage assertions compare converted counts with the recorded terminal result, so re-recording does not require copying token totals into test code.
 
 - The first line of each file holds the Claude Code version, SDK version, model and date.
 - Before saving, personal details are replaced: account email, organization, user name and home folder paths.
@@ -213,7 +251,7 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | Text cancellation drains before the next turn; if the saved partial reply differs from Claude's transcript, reconciliation rebuilds | 2, 4 | 2, 3 |
 | Idle shutdown and server restart resume the saved Claude ID; OpenCode persists the reply and token counts | 2, 3, 4 | 2 |
 | Chat keeps the Claude Code preset and host note; changes to opencode's built-in system prompt do not replace it or restart the session | 2 | 2 |
-| Titles, compaction and generate use independent, non-persistent processes and preserve their task instructions in the user message | 2, 4 | 2 |
+| Titles, compaction and generate use independent, non-persistent processes and preserve their task instructions in the system prompt | 1, 2, 4 | 2 |
 | Closing the registry interrupts, drains and closes an active side call, without saving it as a primary session | 2 | 2 |
 | A terminal Claude error is shown once, without opencode replaying the whole turn | 3 | 2 |
 | Switching model restarts the process and resumes the same Claude session | 2 | 2 |
@@ -225,12 +263,16 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | A rejected attachment during rebuild leaves the corrected request able to recover the full history | 2, 4 | 3 |
 | Reply metadata survives OpenCode persistence; saved catch-up boundaries use real Claude transcript UUIDs | 2, 3, 4 | 3 |
 | Several tool calls in one reply match the right IDs | 2 | 4 |
-| Cancelling during a tool call stops the handler, and Claude records the call as refused | 2 | 4 |
-| Cancelling between steps answers the waiting handler with opencode's saved result | 3 | 4 |
-| Tool errors reach Claude as errors (`isError`), not as success text | 2 | 4 |
+| Cancelling during a tool call stops the handler, and Claude records the call as refused | 2, 4 | 4 |
+| A typed aborted result after cancellation or plain rejection interrupts/drains the parked turn, then delivers saved results and new input in a fresh turn | 2, 3, 4 | 4 |
+| Active-turn steering queues new input alongside tool feedback without interrupting the turn | 2, 4 | 4 |
+| Tool errors and permission rejections reach Claude as errors (`isError`), not as success text | 2, 3, 4 | 4 |
 | If our tool server fails, the call fails and no Claude tools turn on | 2 | 4 |
-| Images and PDFs in tool results reach Claude | 2 | 4 |
-| Shortened tool descriptions keep the subagent list, and long tool names map back | 1 | 4 |
+| Images and PDFs in tool results reach Claude | 2, 4 | 4 |
+| Shortened tool descriptions keep the subagent list, and long tool names map back | 1, 2, 4 | 4 |
+| Catalog changes restart/resume with updated definitions; setup reloads retain the waiting handlers | 2, 4 | 4 |
+| Switching models while OpenCode executes tools lets the other model continue, then catches Claude up on return | 3 | 4 |
+| Real read/edit tools wait for OpenCode approval before changing a fixture file | 4 | 4 |
 | Undo and fork branch from the right message | 3, 4 | 5 |
 | Compaction stops a waiting tool call and doesn't reuse the old process | 3 | 5 |
 | Generate calls running at the same time don't cancel each other | 3 | 5 |

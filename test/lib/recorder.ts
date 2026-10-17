@@ -14,15 +14,18 @@ const DIRECTORY = path.join(import.meta.dir, "../recordings")
 
 export type Line =
   | { readonly from: "spawn"; readonly args: readonly string[] }
-  | { readonly from: "sdk" | "claude"; readonly message: any }
+  | { readonly from: "sdk"; readonly message: any }
+  | { readonly from: "claude"; readonly message: any }
 
 // With RECORD=1, starts the real `claude` and keeps every line in both directions, saved by `save()` to
 // test/recordings/<name>.jsonl. Without it, `spawn` is undefined and the SDK starts `claude` itself.
-export function make(name: string) {
+export function make(name: string, capture = false) {
   const lines: Line[] = []
+  const sessionIDs = new Set<string>()
 
   const spawnClaude: NonNullable<Options["spawnClaudeCodeProcess"]> = (options) => {
     lines.push({ from: "spawn", args: options.args })
+    for (const arg of options.args) if (arg.startsWith("--session-id=") || arg.startsWith("--resume=")) sessionIDs.add(arg.split("=")[1]!)
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
       env: options.env,
@@ -60,7 +63,7 @@ export function make(name: string) {
     writeFileSync(path.join(DIRECTORY, `${name}.jsonl`), text)
   }
 
-  return { spawn: enabled ? spawnClaude : undefined, save }
+  return { spawn: enabled || capture ? spawnClaude : undefined, save, sessionIDs, lines: lines as readonly Line[] }
 }
 
 // What `claude` answered to the SDK's first start-up request

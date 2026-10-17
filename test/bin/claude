@@ -6,14 +6,16 @@ import { createInterface } from "node:readline"
 import { FakeClaude } from "../lib/fake-claude.ts"
 
 const startup = FakeClaude.expectStartup()
+let initialize: any
 if (process.env.FAKE_CLAUDE_LOG) appendFileSync(process.env.FAKE_CLAUDE_LOG, JSON.stringify(process.argv.slice(2)) + "\n")
 
 for await (const line of createInterface({ input: process.stdin })) {
   const message = JSON.parse(line)
   if (message.type === "control_request" && message.request.subtype === "initialize") {
+    initialize = message.request
     process.stdout.write(JSON.stringify(FakeClaude.startupResponse(message.request_id, startup.reply)) + "\n")
   } else if (message.type === "user" || message.request?.subtype === "interrupt") {
     const step = message.type === "user" ? FakeClaude.expectTurn() : FakeClaude.expectInterrupt()
-    for (const reply of FakeClaude.replies(step, message.request_id)) process.stdout.write(JSON.stringify(reply) + "\n")
+    for (const reply of FakeClaude.replies(step, message.request_id)) process.stdout.write(JSON.stringify(FakeClaude.withTools(reply, initialize)) + "\n")
   }
 }

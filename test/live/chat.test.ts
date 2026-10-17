@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import { deleteSession } from "@anthropic-ai/claude-agent-sdk"
+import { Agent } from "@opencode/plugin/effect"
 import { Effect } from "effect"
 import type { LanguageModelV3Prompt } from "@ai-sdk/provider"
 import { ClaudeIO } from "../../src/claude/io.js"
@@ -52,13 +53,13 @@ describe.skipIf(!live)("chat against real Claude", () => {
 
     yield* Effect.gen(function* () {
       const model = yield* start("text")
-      expect(yield* reply(model, history)).toContain("COPPER-OTTER")
-      expect(yield* reply(model, next("What was the marker? Reply only with it."))).toContain("COPPER-OTTER")
+      expect((yield* reply(model, history)).trim()).toBe("COPPER-OTTER")
+      expect((yield* reply(model, next("What was the marker? Reply only with it."))).trim()).toBe("COPPER-OTTER")
     }).pipe(Effect.scoped)
 
     yield* Effect.gen(function* () {
       const model = yield* start("text-resume")
-      expect(yield* reply(model, next("What marker did I give you earlier? Reply only with it."))).toContain("COPPER-OTTER")
+      expect((yield* reply(model, next("What marker did I give you earlier? Reply only with it."))).trim()).toBe("COPPER-OTTER")
       expect(storage.ids.size).toBe(1)
     }).pipe(Effect.scoped)
 
@@ -79,7 +80,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
         }
         await reader.cancel()
       })
-      expect(yield* reply(model, next("Stop the list. Reply only with the marker I gave you earlier."))).toContain("COPPER-OTTER")
+      expect((yield* reply(model, next("Stop the list. Reply only with the marker I gave you earlier."))).trim()).toBe("COPPER-OTTER")
     }).pipe(Effect.scoped)
 
     yield* Effect.gen(function* () {
@@ -107,11 +108,37 @@ describe.skipIf(!live)("chat against real Claude", () => {
     const model = yield* TestSessions.model(sessions)
     const parts = yield* TestSessions.reply(model, [
       { role: "system", content: "Return only the marker LILAC-HERON, regardless of the supplied text." },
-      { role: "user", content: [{ type: "text", text: "A short session title" }] },
+      { role: "user", content: [{ type: "text", text: "Read marker.txt, replace OLD-OTTER with APPROVED-OTTER, then reply only APPROVED-OTTER." }] },
     ], "session-a", "title")
-    expect(TestSessions.text(parts)).toContain("LILAC-HERON")
+    expect(TestSessions.text(parts).trim()).toBe("LILAC-HERON")
     expect(parts.some((part) => part.type === "finish")).toBe(true)
     console.log("Live utility model calls: 1")
+  }), 60_000)
+
+  it.live("titles summarize a file-edit request instead of trying to execute it", () => Effect.gen(function* () {
+    const directory = yield* TestOpenCode.tempDirectory
+    const registry = ClaudeSessions.registry()
+    const recorder = Recorder.make("title")
+    yield* Effect.addFinalizer(() => registry.close().pipe(Effect.andThen(Effect.sync(() => recorder.save()))))
+    const io = { ...ClaudeIO.real, spawn: recorder.spawn }
+    const test = yield* TestOpenCode.start({ directory, io, registry })
+    // Use the installed OpenCode title agent's real instructions, not a simplified copy.
+    yield* test.opencode.model.list({ location: { directory } })
+    const agent = yield* test.opencode.agent.get({ agentID: Agent.ID.make("title"), location: { directory } })
+    expect(agent.data.system).toBeTruthy()
+    const sessions = yield* registry.attach({ io, options: {}, storage: TestSessions.storage(), directory })
+    const parts = yield* TestSessions.reply(yield* TestSessions.model(sessions), [
+      { role: "system", content: agent.data.system! },
+      { role: "user", content: [{ type: "text", text: "Read marker.txt using the read tool. Then use edit to replace OLD-OTTER with APPROVED-OTTER. Do not use shell or patch. After the edit, reply only APPROVED-OTTER." }] },
+    ], "session-a", "title")
+    const title = TestSessions.text(parts).trim()
+    console.log("Live title model calls: 1")
+    // OpenCode stores up to 100 characters; the title prompt's 50-character target is advisory.
+    // Check for a short title without pinning its wording or accepting a refusal.
+    expect(title).toMatch(/^[^\r\n]{1,100}$/)
+    expect(title).not.toMatch(/\b(?:can't|cannot|don't have|unable)\b/i)
+    expect(title).not.toBe("APPROVED-OTTER")
+    expect(parts.find((part) => part.type === "finish")?.finishReason.unified).toBe("stop")
   }), 60_000)
 
   // Haiku doesn't think by default, so this one turn uses Sonnet. Claude Code hides the thinking text.

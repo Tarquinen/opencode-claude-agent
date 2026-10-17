@@ -3,17 +3,6 @@ export * as ConvertToClaudeMessage from "./convert-to-claude-message.js"
 import type { LanguageModelV3FilePart, LanguageModelV3Prompt } from "@ai-sdk/provider"
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages"
 
-// Preserve task instructions for titles, compaction and generate, whose system prompt is fixed.
-export function utility(prompt: LanguageModelV3Prompt): ContentBlockParam[] {
-  const parts: string[] = []
-  for (const message of prompt) {
-    if (message.role === "system") parts.push(message.content)
-  }
-  const blocks = content(prompt)
-  if (parts.length > 0) blocks.unshift({ type: "text", text: `<instructions>\n${parts.join("\n\n")}\n</instructions>` })
-  return blocks
-}
-
 // A fresh/throwaway query has no history. Preserve roles as text, and attachments as real content blocks.
 export function content(prompt: LanguageModelV3Prompt): ContentBlockParam[] {
   const blocks: ContentBlockParam[] = []

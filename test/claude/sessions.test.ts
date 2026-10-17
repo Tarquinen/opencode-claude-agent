@@ -264,10 +264,10 @@ describe("Claude sessions", () => {
     for (const run of claude.runs.slice(1)) {
       expect(run.args).toContain("--no-session-persistence")
       const init = run.received.find((message) => message.request?.subtype === "initialize").request
-      expect(init.systemPrompt).toEqual([ClaudeSystemPrompt.utility])
+      expect(init.systemPrompt).toEqual(["You are a concise test assistant."])
       expect(init.appendSystemPrompt).toBeUndefined()
       const user = run.received.find((message) => message.type === "user")
-      expect(user.message.content[0]).toEqual({ type: "text", text: "<instructions>\nYou are a concise test assistant.\n</instructions>" })
+      expect(JSON.stringify(user.message.content)).not.toContain("You are a concise test assistant.")
       expect(user.message.content).toContainEqual({ type: "text", text: "What was the marker? Reply only with it." })
     }
     expect(test.storage.data.size).toBe(1)

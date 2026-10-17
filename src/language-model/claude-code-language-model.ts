@@ -28,7 +28,8 @@ export class Model implements LanguageModelV3 {
   async doStream(options: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
     const abort = new AbortController()
     const signal = options.abortSignal ? AbortSignal.any([abort.signal, options.abortSignal]) : abort.signal
-    const convert = ConvertClaudeStream.make()
+    const tools = options.toolChoice?.type === "none" ? [] : options.tools?.filter((tool) => tool.type === "function") ?? []
+    const convert = ConvertClaudeStream.make(tools)
     const headers = new Headers(options.headers as HeadersInit)
     const primary = headers.get(RequestKind.HEADER) === "primary"
     let cancelled = false
@@ -39,8 +40,9 @@ export class Model implements LanguageModelV3 {
         task = this.dependencies.run({
           sessionID: primary ? headers.get(RequestKind.SESSION_HEADER) ?? undefined : undefined,
           model: this.modelId,
-          system: primary ? ClaudeSystemPrompt.primary : ClaudeSystemPrompt.utility,
+          system: primary ? ClaudeSystemPrompt.make(options.prompt, tools.length > 0) : ClaudeSystemPrompt.utility(options.prompt),
           prompt: options.prompt,
+          tools: primary ? tools : [],
           emit: (message) => {
             if (cancelled) return
             for (const part of convert(message)) controller.enqueue(part)
