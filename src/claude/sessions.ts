@@ -57,10 +57,8 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("claude-code/Sessions") {}
 
-const attempt = <A>(run: () => Promise<A>) => Effect.tryPromise({
-  try: run,
-  catch: (error) => error instanceof Error ? error : new Error(String(error)),
-})
+const toError = (error: unknown) => error instanceof Error ? error : new Error(String(error))
+const attempt = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: toError })
 
 export type Registry = ReturnType<typeof registry>
 
@@ -173,7 +171,7 @@ export function registry() {
     const turn = Effect.fn("ClaudeSessions.turn")(function* (entry: Entry, request: Request, start: number, results?: ReturnType<typeof ToolResult.collect>) {
       const content = yield* Effect.try({
         try: () => request.sessionID || entry.record ? CatchUp.content(request.prompt, results?.end ?? start) : ConvertToClaudeMessage.content(request.prompt),
-        catch: (error) => error instanceof Error ? error : new Error(String(error)),
+        catch: toError,
       })
       // A rejected rebuild must not leave an empty process paired with the old durable record.
       const process = yield* open(entry, request)
