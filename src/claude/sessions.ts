@@ -32,7 +32,7 @@ interface Request {
   readonly maxOutputTokens?: number
   readonly system: NonNullable<Options["systemPrompt"]>
   readonly prompt: LanguageModelV3Prompt
-  readonly tools?: readonly LanguageModelV3FunctionTool[]
+  readonly tools: readonly LanguageModelV3FunctionTool[]
   readonly emit: (message: SDKMessage) => void
 }
 
@@ -130,14 +130,13 @@ export function registry() {
       if (!entry.process) {
         const executable = input.options.claudePath ?? input.io.which()
         if (!executable) return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
-        const tools = request.tools ?? []
         entry.model = request.model
         entry.effort = request.effort
         entry.maxOutputTokens = request.maxOutputTokens
         entry.system = JSON.stringify(request.system)
         const pending = PendingTools.make()
         entry.pending = pending
-        entry.tools = JSON.stringify(tools)
+        entry.tools = JSON.stringify(request.tools)
         const options = ClaudeQueryOptions.base({ executable, io: input.io })
         if (request.maxOutputTokens !== undefined) options.env = { ...options.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(request.maxOutputTokens) }
         entry.process = yield* Effect.try(() => ClaudeSession.start({
@@ -149,7 +148,7 @@ export function registry() {
           includePartialMessages: true,
           persistSession: request.sessionID !== undefined,
           hooks: ToolHooks.make(pending),
-          mcpServers: tools.length ? { opencode: ToolServer.make(tools, pending) } : {},
+          mcpServers: request.tools.length ? { opencode: ToolServer.make(request.tools, pending) } : {},
           ...(entry.record ? { resume: entry.record.claudeSessionID } : { sessionId: crypto.randomUUID() }),
         }))
       }
@@ -187,7 +186,7 @@ export function registry() {
       let parked = false
       const waiting: string[] = []
       const emit = (message: SDKMessage) => {
-        if (message.type === "system" && message.subtype === "init" && request.tools?.length
+        if (message.type === "system" && message.subtype === "init" && request.tools.length
           && !message.mcp_servers.some((server) => server.name === "opencode" && server.status === "connected")) {
           throw new Error("The OpenCode tool server did not connect to Claude Code")
         }
@@ -197,7 +196,7 @@ export function registry() {
           for (const part of message.message.content) {
             if (part.type === "text") reply.push({ type: "text", text: part.text })
             if (part.type === "tool_use") {
-              const name = ToolNames.original(part.name, request.tools ?? [])
+              const name = ToolNames.original(part.name, request.tools)
               entry.pending!.expect(part.id, part.name)
               waiting.push(part.id)
               reply.push({ type: "tool-call", toolCallId: part.id, toolName: name, input: part.input })
@@ -294,7 +293,7 @@ export function registry() {
         // Retire an exited or incompatible process before choosing how to deliver tool results.
         // open() must not replace a process after we have chosen to continue its parked turn.
         if (current.process?.ended || current.maxOutputTokens !== request.maxOutputTokens
-          || current.system !== JSON.stringify(request.system) || current.tools !== JSON.stringify(request.tools ?? [])) yield* stop(current)
+          || current.system !== JSON.stringify(request.system) || current.tools !== JSON.stringify(request.tools)) yield* stop(current)
         let start = 0
         let results: ReturnType<typeof ToolResult.collect> | undefined
         if (request.sessionID) {
