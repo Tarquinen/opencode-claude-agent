@@ -17,7 +17,7 @@ export type Line =
   | { readonly from: "sdk"; readonly process?: number; readonly message: any }
   | { readonly from: "claude"; readonly process?: number; readonly message: any }
 
-// With RECORD=1, starts the real `claude` and keeps every line in both directions, saved by `save()` to
+// With RECORD=1, starts the real `claude` and captures traffic without thinking, saved by `save()` to
 // test/recordings/<name>.jsonl. Without it, `spawn` is undefined and the SDK starts `claude` itself.
 export function make(name: string, capture = false) {
   const lines: Line[] = []
@@ -34,15 +34,17 @@ export function make(name: string, capture = false) {
       signal: options.signal,
       stdio: ["pipe", "pipe", "inherit"],
     })
-    // The SDK reads and writes our own streams, which copy each line on its way between the SDK and `claude`
+    function record(from: "sdk" | "claude", line: string) {
+      const message = parse(line)
+      if (message !== undefined) lines.push({ from, process, message })
+    }
+    // Forward the original streams; only the captured copy is filtered.
     const stdin = new PassThrough()
     stdin.pipe(child.stdin)
-    createInterface({ input: stdin }).on("line", (line) => lines.push({ from: "sdk", process, message: JSON.parse(line) }))
+    createInterface({ input: stdin }).on("line", (line) => record("sdk", line))
     const stdout = new PassThrough()
     child.stdout.pipe(stdout)
-    createInterface({ input: child.stdout }).on("line", (line) =>
-      lines.push({ from: "claude", process, message: JSON.parse(line) }),
-    )
+    createInterface({ input: child.stdout }).on("line", (line) => record("claude", line))
     return Object.assign(child, { stdin, stdout })
   }
 
@@ -66,6 +68,24 @@ export function make(name: string, capture = false) {
   }
 
   return { spawn: enabled || capture ? spawnClaude : undefined, save, sessionIDs, lines: lines as readonly Line[] }
+}
+
+// Never retain thinking, including signed or redacted blocks and echoed input history.
+export function parse(line: string) {
+  return JSON.parse(line, (_key, value) => {
+    if (!value || typeof value !== "object") return value
+    if (Array.isArray(value)) {
+      const items = []
+      for (const item of value) if (item !== undefined) items.push(item)
+      return items
+    }
+    if (value.type === "thinking" || value.type === "thinking_delta" || value.type === "redacted_thinking" || value.type === "signature_delta") return undefined
+    if (value.type === "reasoning" || value.type === "reasoning-start" || value.type === "reasoning-delta" || value.type === "reasoning-end") return undefined
+    if (value.type === "content_block_start" && value.content_block === undefined) return undefined
+    if (value.type === "content_block_delta" && value.delta === undefined) return undefined
+    if (value.type === "stream_event" && value.event === undefined) return undefined
+    return value
+  })
 }
 
 // What `claude` answered to the SDK's first start-up request

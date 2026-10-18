@@ -9,7 +9,7 @@ Four levels. Most tests run against a fake `claude` program, so they are fast, o
 | Level | Runs for real | Faked | Covers |
 |---|---|---|---|
 | 1. Pure logic | Our plain functions | Nothing | Message and stream conversion, fingerprints, the four sync cases, catch-up messages, tool names and descriptions, usage, errors |
-| 2. Fake Claude Code | The Claude SDK and our model code | The `claude` program | Text and thinking, waiting tool calls, matching tool IDs, cancelling during a tool call, PDFs from tools, shutdown order, plugin reloads, plan-limit errors |
+| 2. Fake Claude Code | The Claude SDK and our model code | The `claude` program | Text, waiting tool calls, matching tool IDs, cancelling during a tool call, PDFs from tools, shutdown order, plugin reloads, plan-limit errors |
 | 3. Inside opencode | opencode's session loop, tools, permissions, storage and hooks, plus everything in level 2 | The `claude` program, and a scripted "normal" model | Switching models both ways, undo, fork, compaction, titles, cancelling between steps, the retry hook |
 | 4. Live | Everything, with real Claude Code and Haiku | Nothing | About ten short scenarios. Also records the traffic that levels 1 and 2 are built from |
 
@@ -245,9 +245,9 @@ Source review:
 
 ## Recordings
 
-`RECORD=1` wraps the real spawn function and saves every line in both directions, one file per scenario in `test/recordings/` (`test/lib/recorder.ts`). The start-up recordings (`startup`, `startup-logged-out`) come from a login check run on its own, so each file holds one complete `claude` run.
+`RECORD=1` wraps the real spawn function and saves filtered traffic in both directions, one file per scenario in `test/recordings/` (`test/lib/recorder.ts`). Never save thinking or reasoning content, signatures, or redacted thinking in fixtures or diagnostics. The recorder removes these before retaining a captured message. The live reasoning check uses no recorder and disables transcript persistence. The start-up recordings (`startup`, `startup-logged-out`) come from a login check run on its own, so each file holds one complete `claude` run.
 
-Phase 2 adds `text` (two turns), `text-resume`, `text-cancel` (interrupt then recovery), `attachments`, `utility` (side-call instructions) and `thinking` (Claude Code hides Sonnet's thinking text by default, so it arrives empty). Each is one complete process. Chat recordings use the Claude Code preset and OpenCode runtime note; `utility` preserves the supplied task system prompt. The thinking test is separate, so it can be recorded on its own with `-t thinking`. The live test regenerates these through the plugin model itself. Run recording and offline tests sequentially, since recording replaces fixtures. Usage assertions compare converted counts with the recorded terminal result, so re-recording does not require copying token totals into test code.
+Phase 2 adds `text` (two turns), `text-resume`, `text-cancel` (interrupt then recovery), `attachments` and `utility` (side-call instructions). Each is one complete process. Chat recordings use the Claude Code preset and OpenCode runtime note; `utility` preserves the supplied task system prompt. The live test regenerates these through the plugin model itself. Run recording and offline tests sequentially, since recording replaces fixtures. Usage assertions compare converted counts with the recorded terminal result, so re-recording does not require copying token totals into test code.
 
 - The first line of each file holds the Claude Code version, SDK version, model and date.
 - Before saving, personal details are replaced: account email, organization, user name and home folder paths.
@@ -302,7 +302,8 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | Installing claude after startup is picked up by the next login check | 2 | 1 |
 | A failed startup is reported and the next check can recover; a stuck startup times out and closes its process | 2 | 1 |
 | An old or unreported Claude Code version asks the user to update; the minimum supported version is accepted | 2 | 1 |
-| Text, thinking and usage arrive in order | 2 | 2 |
+| Text and usage arrive in order | 2 | 2 |
+| Thinking arrives as visible reasoning in a non-persistent live call | 4 | 2 |
 | Usage counts each API message once, and context size comes from the last API call, not a sum (a turn makes several calls only once tools exist) | 1 | 2, 4 |
 | Shutdown goes interrupt, then drain, then close | 2 | 2 |
 | One process per session, and an old process stopping never closes its replacement | 2 | 2 |

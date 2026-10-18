@@ -74,20 +74,6 @@ describe("Claude conversions", () => {
     expect(finish.usage.outputTokens.total).toBe(usage.output_tokens)
   })
 
-  test("recorded thinking becomes reasoning, without empty deltas or the signature", () => {
-    const parts = convertTurn("thinking")
-    const types: string[] = []
-    for (const part of parts) {
-      if (part.type !== "text-delta") types.push(part.type)
-    }
-    expect(types).toEqual(["response-metadata", "reasoning-start", "reasoning-end", "text-start", "text-end", "finish"])
-    expect(parts.some((part) => part.type === "text-delta" && part.delta.length > 0)).toBe(true)
-    expect(JSON.stringify(parts)).not.toContain("signature")
-    const finish = parts.at(-1)
-    if (finish?.type !== "finish") throw new Error("Expected a finish part")
-    expect(finish.usage.outputTokens.reasoning).toBe(Recorder.result("thinking").usage.output_tokens_details?.thinking_tokens)
-  })
-
   test("emits a real error for a recorded failed turn", () => {
     const parts = convertTurn("text-cancel")
     expect(parts.some((part) => part.type === "text-delta")).toBe(true)

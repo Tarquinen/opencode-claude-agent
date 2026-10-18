@@ -26,6 +26,8 @@ export function base(input: { executable: string; io: ClaudeIO.Interface }): Opt
     env: { ...input.io.env(), ...ISOLATION_ENV },
     settingSources: [],
     settings: { disableAllHooks: true },
+    // Request visible thinking summaries so OpenCode has reasoning text to display.
+    thinking: { type: "adaptive", display: "summarized" },
     strictMcpConfig: true,
     skills: [],
     tools: [],
