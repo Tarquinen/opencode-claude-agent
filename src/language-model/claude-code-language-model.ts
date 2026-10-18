@@ -32,12 +32,30 @@ export class Model implements LanguageModelV3 {
     const convert = ConvertClaudeStream.make(tools)
     const headers = new Headers(options.headers as HeadersInit)
     const kind = headers.get(RequestKind.HEADER)
-    const primary = kind === "primary"
-    const branch = kind === "generate" || kind === "compaction"
-    const role = options.providerOptions?.["claude-code"]?.[ClaudeSystemPrompt.AGENT_OPTION]
-    const effort = options.providerOptions?.["claude-code"]?.effort
+    const session = headers.get(RequestKind.SESSION_HEADER) ?? undefined
+    const settings = options.providerOptions?.["claude-code"]
+    const role = settings?.[ClaudeSystemPrompt.AGENT_OPTION]
+    const agent = typeof role === "string" ? role : undefined
+    const effort = settings?.effort
     if (effort !== undefined && (typeof effort !== "string" || !["low", "medium", "high", "xhigh", "max"].includes(effort))) {
       throw new Error("Claude Code effort must be low, medium, high, xhigh or max")
+    }
+    let sessionID: string | undefined
+    let sourceID: string | undefined
+    let offered: typeof tools = []
+    let system: string | ReturnType<typeof ClaudeSystemPrompt.make>
+    if (kind === "primary") {
+      sessionID = session
+      sourceID = headers.get(RequestKind.FORK_HEADER) ?? undefined
+      offered = tools
+      system = ClaudeSystemPrompt.make(options.prompt, tools.length > 0, agent)
+    } else if (kind === "generate" || kind === "compaction") {
+      // Conversation branches copy their source session and keep the Claude prompt. OpenCode supplies their task as user input.
+      sourceID = session
+      system = ClaudeSystemPrompt.make(options.prompt, false, agent)
+    } else {
+      // Titles are standalone tasks with their own system instructions.
+      system = ClaudeSystemPrompt.utility(options.prompt)
     }
     let cancelled = false
     let task: Promise<void>
@@ -45,19 +63,15 @@ export class Model implements LanguageModelV3 {
       start: (controller) => {
         controller.enqueue({ type: "stream-start", warnings: [] })
         task = this.dependencies.run({
-          sessionID: primary ? headers.get(RequestKind.SESSION_HEADER) ?? undefined : undefined,
-          sourceID: primary ? headers.get(RequestKind.FORK_HEADER) ?? undefined
-            : branch ? headers.get(RequestKind.SESSION_HEADER) ?? undefined : undefined,
+          sessionID,
+          sourceID,
           compaction: kind === "compaction",
           model: this.modelId,
           effort: effort as EffortLevel | undefined,
           maxOutputTokens: options.maxOutputTokens,
-          // Conversation branches keep the Claude prompt. OpenCode supplies their task as user input.
-          // Titles are standalone tasks with their own system instructions.
-          system: primary || branch ? ClaudeSystemPrompt.make(options.prompt, primary && tools.length > 0, typeof role === "string" ? role : undefined)
-            : ClaudeSystemPrompt.utility(options.prompt),
+          system,
           prompt: options.prompt,
-          tools: primary ? tools : [],
+          tools: offered,
           emit: (message) => {
             if (cancelled) return
             for (const part of convert(message)) controller.enqueue(part)
