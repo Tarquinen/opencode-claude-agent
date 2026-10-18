@@ -13,18 +13,20 @@ export const enabled = process.env.RECORD === "1"
 const DIRECTORY = path.join(import.meta.dir, "../recordings")
 
 export type Line =
-  | { readonly from: "spawn"; readonly args: readonly string[] }
-  | { readonly from: "sdk"; readonly message: any }
-  | { readonly from: "claude"; readonly message: any }
+  | { readonly from: "spawn"; readonly process?: number; readonly args: readonly string[] }
+  | { readonly from: "sdk"; readonly process?: number; readonly message: any }
+  | { readonly from: "claude"; readonly process?: number; readonly message: any }
 
 // With RECORD=1, starts the real `claude` and keeps every line in both directions, saved by `save()` to
 // test/recordings/<name>.jsonl. Without it, `spawn` is undefined and the SDK starts `claude` itself.
 export function make(name: string, capture = false) {
   const lines: Line[] = []
   const sessionIDs = new Set<string>()
+  let nextProcess = 0
 
   const spawnClaude: NonNullable<Options["spawnClaudeCodeProcess"]> = (options) => {
-    lines.push({ from: "spawn", args: options.args })
+    const process = nextProcess++
+    lines.push({ from: "spawn", process, args: options.args })
     for (const arg of options.args) if (arg.startsWith("--session-id=") || arg.startsWith("--resume=")) sessionIDs.add(arg.split("=")[1]!)
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
@@ -35,11 +37,11 @@ export function make(name: string, capture = false) {
     // The SDK reads and writes our own streams, which copy each line on its way between the SDK and `claude`
     const stdin = new PassThrough()
     stdin.pipe(child.stdin)
-    createInterface({ input: stdin }).on("line", (line) => lines.push({ from: "sdk", message: JSON.parse(line) }))
+    createInterface({ input: stdin }).on("line", (line) => lines.push({ from: "sdk", process, message: JSON.parse(line) }))
     const stdout = new PassThrough()
     child.stdout.pipe(stdout)
     createInterface({ input: child.stdout }).on("line", (line) =>
-      lines.push({ from: "claude", message: JSON.parse(line) }),
+      lines.push({ from: "claude", process, message: JSON.parse(line) }),
     )
     return Object.assign(child, { stdin, stdout })
   }

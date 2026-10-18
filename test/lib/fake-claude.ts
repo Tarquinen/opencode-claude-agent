@@ -38,9 +38,17 @@ export type Step = Startup | Input | Exchange
 export function replay(recording: string, options: { skipProbes?: boolean } = {}): Step[] {
   const steps: Step[] = []
   let current: Exchange | undefined
+  const probes = new Set<number>()
   for (const line of Recorder.load(recording)) {
+    // Chat recordings also capture OpenCode's login probes, which can interleave with chat. Recordings that number
+    // their processes skip each probe whole, including its context discovery.
+    if (options.skipProbes && line.process !== undefined) {
+      if (line.from === "spawn" && isProbe(line.args)) probes.add(line.process)
+      if (probes.has(line.process)) continue
+    }
     if (line.from === "sdk") {
       if (line.message.request?.subtype === "initialize") {
+        // Older recordings only had initialization probes, without process IDs or context controls.
         if (!options.skipProbes || line.message.request.hooks) steps.push(expectStartup({ recording }))
         current = undefined
       } else {
@@ -50,6 +58,11 @@ export function replay(recording: string, options: { skipProbes?: boolean } = {}
     } else if (line.from === "claude" && current) current.replies.push(line.message)
   }
   return steps
+}
+
+// Login probes are the only runs that do not stream partial messages
+function isProbe(args: readonly string[]) {
+  return !args.includes("--include-partial-messages")
 }
 
 // Text recordings predate the bridge. Mirror the offered SDK servers in their otherwise unchanged init event.
@@ -121,6 +134,32 @@ export function startupResponse(requestID: string, reply: SDKControlInitializeRe
   }
 }
 
+// The login probe's recorded no-prompt controls by model, parsed on first use. Chat controls stay in the test's script.
+let probeControls: Map<string, any> | undefined
+
+function loadProbeControls() {
+  const controls = new Map<string, any>()
+  let model: string | undefined
+  let control: string | undefined
+  for (const line of Recorder.load("startup")) {
+    if (line.from === "sdk") {
+      control = line.message.request?.subtype
+      if (control === "set_model") model = line.message.request.model
+    } else if (line.from === "claude" && line.message.type === "control_response" && model && control) {
+      controls.set(`${model}/${control}`, line.message)
+    }
+  }
+  return controls
+}
+
+// Also used by the executable fake
+export function probeResponse(message: any, model: string | undefined) {
+  probeControls ??= loadProbeControls()
+  const reply = probeControls.get(`${model}/${message.request?.subtype}`)
+  if (!reply) return
+  return { ...reply, response: { ...reply.response, request_id: message.request_id } }
+}
+
 // One `claude` the SDK started: its flags, its environment and every message the SDK wrote to it
 export interface Run {
   readonly args: readonly string[]
@@ -168,7 +207,7 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
   async function answer(message: any, process: FakeProcess, closed: Promise<void>, run: Run, requestIDs: Map<string, string>) {
     const type = message.type === "user" ? "user" : message.request?.subtype === "initialize" ? "startup" : message.request?.subtype
     // Embedded OpenCode loads plugins for several locations. Its login probes are independent of chat ordering.
-    if (probeReply && !run.args.includes("--include-partial-messages") && type === "startup") {
+    if (probeReply && isProbe(run.args) && type === "startup") {
       process.stdout.write(JSON.stringify(startupResponse(message.request_id, probeReply)) + "\n")
       return
     }
@@ -177,6 +216,14 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
       ? message.type === step.input.type && message.request?.subtype === step.input.request?.subtype
         && message.response?.request_id === step.input.response?.request_id
       : type === step?.type
+    if (!matches && isProbe(run.args)) {
+      const model = run.received.findLast((message) => message.request?.subtype === "set_model")?.request.model
+      const reply = probeResponse(message, model)
+      if (reply) {
+        process.stdout.write(JSON.stringify(reply) + "\n")
+        return
+      }
+    }
     if (!step || !matches) {
       errors.push(`unexpected ${type ?? message.type}, the next step is ${step?.type ?? "the end of the script"}`)
       return

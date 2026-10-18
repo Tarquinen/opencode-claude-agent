@@ -23,6 +23,7 @@ describe("login check", () => {
       expect(run.args).toContain("--setting-sources=")
       expect(run.args).toContain("--strict-mcp-config")
       expect(run.args).toContain("--permission-mode=dontAsk")
+      expect(run.args).toContain("--no-session-persistence")
       expect(JSON.parse(run.args[run.args.indexOf("--settings") + 1]!)).toEqual({ disableAllHooks: true })
       expect(run.received[0].request.skills).toEqual([])
 
@@ -42,6 +43,53 @@ describe("login check", () => {
       expect(result.models.map((model) => model.value)).toContain("sonnet")
     }),
   )
+
+  it.effect("discovers each model's capacity without prompts or token-count requests", () => Effect.gen(function* () {
+    const steps = FakeClaude.replay("startup")
+    const context = steps.find((step) => step.type === "exchange" && step.input.request?.subtype === "get_context_usage")
+    if (context?.type !== "exchange") throw new Error("Missing context recording")
+    // Claude's auto-compaction window is not the model's capacity.
+    context.replies[0].response.response.maxTokens = 200_000
+    const claude = FakeClaude.make(steps)
+    const result = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable: FakeIO.EXECUTABLE, io: FakeIO.make({ claude }) }))
+    expect(result.models.find((model) => model.value === "opus")?.contextWindow).toBe(1_000_000)
+    expect(result.models.find((model) => model.value === "claude-opus-4-6")?.contextWindow).toBe(200_000)
+    expect(claude.runs).toHaveLength(1)
+    const requests = claude.runs[0]!.received
+    expect(requests.some((message) => message.type === "user")).toBe(false)
+    const contexts = requests.filter((message) => message.request?.subtype === "get_context_usage")
+    expect(contexts).toHaveLength(result.models.filter((model) => model.value !== "default").length)
+    for (const context of contexts) expect(context.request.detail).toBe("summary")
+    claude.check()
+  }))
+
+  it.effect("keeps the login and other limits when one model reports an invalid capacity", () => Effect.gen(function* () {
+    const steps = FakeClaude.replay("startup")
+    const context = steps.find((step) => step.type === "exchange" && step.input.request?.subtype === "get_context_usage")
+    if (context?.type !== "exchange") throw new Error("Missing context recording")
+    context.replies[0].response.response.rawMaxTokens = 0
+    const claude = FakeClaude.make(steps)
+    const result = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable: FakeIO.EXECUTABLE, io: FakeIO.make({ claude }) }))
+    expect(ClaudeProbe.isSubscription(result.account)).toBe(true)
+    expect(result.models.find((model) => model.value === "opus")?.contextWindow).toBeUndefined()
+    expect(result.models.find((model) => model.value === "sonnet")?.contextWindow).toBe(1_000_000)
+    claude.check()
+  }))
+
+  it.effect("closes stuck context discovery without turning it into a login failure", () => Effect.gen(function* () {
+    const steps = FakeClaude.replay("startup").slice(0, 3)
+    const context = { ...steps[2]!, hold: new Promise<void>(() => {}) }
+    steps[2] = context
+    const claude = FakeClaude.make(steps)
+    const check = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable: FakeIO.EXECUTABLE, io: FakeIO.make({ claude }) })).pipe(Effect.forkScoped)
+    yield* Effect.promise(() => claude.started(context))
+    yield* TestClock.adjust("30 seconds")
+    const result = yield* Fiber.join(check)
+    expect(ClaudeProbe.isSubscription(result.account)).toBe(true)
+    expect(result.models.find((model) => model.value === "opus")?.contextWindow).toBeUndefined()
+    yield* Effect.promise(() => claude.runs[0]!.closed)
+    expect(() => claude.check()).toThrow("1 script steps did not finish")
+  }))
 
   it.effect("accepts the minimum version that supports verbatim prompts", () =>
     Effect.gen(function* () {

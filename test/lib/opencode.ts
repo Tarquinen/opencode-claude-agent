@@ -6,7 +6,7 @@ import { OpenCode } from "@opencode/sdk/effect"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { Effect, Schedule } from "effect"
+import { Effect, Schedule, type Duration } from "effect"
 import type { ClaudeIO } from "../../src/claude/io.js"
 import type { ClaudeSessions } from "../../src/claude/sessions.js"
 import { make } from "../../src/index.js"
@@ -72,9 +72,9 @@ export const connection = Effect.fn("TestOpenCode.connection")(function* (openco
 })
 
 // The plugin updates opencode in the background, so tests check again until opencode shows the change
-export function waitUntil<A, E>(read: Effect.Effect<A, E>, done: (value: A) => boolean) {
+export function waitUntil<A, E>(read: Effect.Effect<A, E>, done: (value: A) => boolean, timeout: Duration.Input = "5 seconds") {
   return read.pipe(
     Effect.repeat({ until: done, schedule: Schedule.spaced("10 millis") }),
-    Effect.timeout("5 seconds"),
+    Effect.timeout(timeout),
   )
 }

@@ -14,6 +14,11 @@ import { Recorder } from "../lib/recorder.js"
 // recordings. `claude auth status` exits with 1 when logged out.
 const live = !process.env.CI && process.env.CLAUDE_LIVE === "1" && Bun.spawnSync(["claude", "auth", "status"]).exitCode === 0
 
+// The probe gives `claude` 30 seconds to start and 30 more for context discovery. Waiting longer lets a stuck
+// probe report its own error before the test times out.
+const PROBE_WAIT = "60 seconds"
+const TIMEOUT = 90_000
+
 // An empty config folder is a `claude` that has never logged in
 const loggedOutIO = Effect.gen(function* () {
   const config = yield* Effect.acquireRelease(
@@ -23,29 +28,56 @@ const loggedOutIO = Effect.gen(function* () {
   return { ...ClaudeIO.real, env: () => ({ ...process.env, CLAUDE_CONFIG_DIR: config }) } satisfies ClaudeIO.Interface
 })
 
-// One login check with the real `claude`, saved as a recording with RECORD=1
-const check = Effect.fn(function* (name: string, io: ClaudeIO.Interface) {
-  const recorder = Recorder.make(name)
+// One login check with the real `claude`
+const probe = (io: ClaudeIO.Interface) => {
   const executable = io.which()
   if (!executable) throw new Error("claude is not on PATH")
-  const result = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable, io: { ...io, spawn: recorder.spawn } }))
+  return ClaudeProbe.run(ClaudeQueryOptions.base({ executable, io }))
+}
+
+// A login check saved as a recording with RECORD=1
+const check = Effect.fn(function* (name: string, io: ClaudeIO.Interface) {
+  const recorder = Recorder.make(name)
+  const result = yield* probe({ ...io, spawn: recorder.spawn })
   recorder.save()
   return result
 })
 
 describe.skipIf(!live)("start-up against the real claude", () => {
   it.live(
-    "the login check reports the subscription and models",
+    "the login check reports the subscription and each model's context window",
     () =>
       Effect.gen(function* () {
         const result = yield* check("startup", ClaudeIO.real)
         expect(ClaudeProbe.isSubscription(result.account)).toBe(true)
         expect(result.models.map((model) => model.value)).toContain("sonnet")
-
-        const loggedOut = yield* check("startup-logged-out", yield* loggedOutIO)
-        expect(ClaudeProbe.isSubscription(loggedOut.account)).toBe(false)
+        for (const model of result.models) {
+          if (model.value !== "default") expect(model.contextWindow).toBeGreaterThan(0)
+        }
       }),
-    30_000,
+    TIMEOUT,
+  )
+
+  it.live(
+    "the login check honors claude's 1M context opt-out",
+    () =>
+      Effect.gen(function* () {
+        const result = yield* probe({ ...ClaudeIO.real, env: () => ({ ...process.env, CLAUDE_CODE_DISABLE_1M_CONTEXT: "1" }) })
+        for (const model of result.models) {
+          if (model.value !== "default") expect(model.contextWindow).toBe(200_000)
+        }
+      }),
+    TIMEOUT,
+  )
+
+  it.live(
+    "the login check reports a logged-out claude",
+    () =>
+      Effect.gen(function* () {
+        const result = yield* check("startup-logged-out", yield* loggedOutIO)
+        expect(ClaudeProbe.isSubscription(result.account)).toBe(false)
+      }),
+    TIMEOUT,
   )
 
   it.live(
@@ -58,13 +90,14 @@ describe.skipIf(!live)("start-up against the real claude", () => {
         // The built-in list only has aliases, so full model IDs mean claude's own list has arrived
         const ids = yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) =>
           ids.some((id) => id.startsWith("claude-")),
+          PROBE_WAIT,
         )
         expect(ids).toContain("sonnet")
         expect(ids).not.toContain("default")
         const connection = yield* TestOpenCode.connection(test.opencode)
         expect(connection?.status).toBeUndefined()
       }),
-    30_000,
+    TIMEOUT,
   )
 
   it.live(
@@ -77,9 +110,10 @@ describe.skipIf(!live)("start-up against the real claude", () => {
         const connection = yield* TestOpenCode.waitUntil(
           TestOpenCode.connection(test.opencode),
           (connection) => connection?.status !== undefined,
+          PROBE_WAIT,
         )
         expect(connection?.status?.status).toBe("needs_auth")
       }),
-    30_000,
+    TIMEOUT,
   )
 })

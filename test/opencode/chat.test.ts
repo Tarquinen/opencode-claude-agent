@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import { Location, Model } from "@opencode/plugin/effect"
+import { define } from "@opencode/plugin/effect/plugin"
 import { Effect } from "effect"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
 import { ClaudeProvider } from "../../src/plugin/provider.js"
@@ -77,6 +78,8 @@ describe("embedded text chat", () => {
       const calls = claude.runs.filter((run) => run.args.includes("--include-partial-messages"))
       expect(calls).toHaveLength(1)
       expect(calls[0]!.received.filter((message) => message.type === "user")).toHaveLength(2)
+      expect(calls[0]!.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBeUndefined()
+      expect(calls[0]!.env.DISABLE_AUTO_COMPACT).toBe("1")
       return session.id
     }).pipe(Effect.scoped)
     yield* before.close()
@@ -104,4 +107,30 @@ describe("embedded text chat", () => {
     yield* Effect.promise(() => resumed.closed)
     claude.check()
   }), 15_000)
+
+  for (const cap of [undefined, 4096]) it.live(`preserves ${cap === undefined ? "inherited output defaults" : "explicit output overrides"}`, () => Effect.gen(function* () {
+    const claude = FakeClaude.make([FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt()], { probes: true })
+    const registry = ClaudeSessions.registry()
+    yield* Effect.addFinalizer(() => registry.close())
+    const override = define({ id: "output-limit", effect: Effect.fn(function* (ctx) {
+      yield* ctx.session.hook("context", (event) => Effect.sync(() => {
+        if (cap !== undefined) event.options.maxTokens = cap
+      }))
+    }) })
+    const test = yield* TestOpenCode.start({
+      io: FakeIO.make({ claude, env: { CLAUDE_CODE_MAX_OUTPUT_TOKENS: "8192" } }), registry, plugins: [override],
+    })
+    yield* TestOpenCode.connect(test.opencode)
+    const session = yield* test.opencode.session.create({
+      title: "Output budget", location: { directory: Location.PublicRef.fields.directory.make(test.directory) },
+      model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }),
+    })
+    yield* test.opencode.session.prompt({ sessionID: session.id, text: "Reply with the marker" })
+    yield* test.opencode.session.wait({ sessionID: session.id })
+    const calls = claude.runs.filter((run) => run.args.includes("--include-partial-messages"))
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe(String(cap ?? 8192))
+    yield* registry.close()
+    claude.check()
+  }))
 })

@@ -36,6 +36,9 @@ describe("loading the plugin", () => {
       const haiku = models.data.find((model) => model.providerID === ClaudeProvider.ID && model.id === "haiku")
       expect(sonnet?.variants).toContainEqual({ id: Model.VariantID.make("high"), settings: { effort: "high" } })
       expect(haiku?.family).toBe(Model.Family.make("claude-haiku"))
+      expect(sonnet?.limit).toEqual({ context: 1_000_000, output: 0 })
+      const older = models.data.find((model) => model.providerID === ClaudeProvider.ID && model.id === "claude-opus-4-6")
+      expect(older?.limit.context).toBe(200_000)
       for (const model of models.data) {
         if (model.providerID !== ClaudeProvider.ID) continue
         expect(model.cost).toEqual([])
@@ -67,6 +70,8 @@ describe("loading the plugin", () => {
       const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), directory, database })
       yield* Effect.promise(() => claude.started(startup))
       expect(yield* TestOpenCode.models(test.opencode)).toEqual(saved)
+      const models = yield* test.opencode.model.list()
+      expect(models.data.find((model) => model.providerID === ClaudeProvider.ID && model.id === "opus")?.limit.context).toBe(1_000_000)
 
       hold.resolve()
       yield* Effect.promise(() => claude.reached(startup))
