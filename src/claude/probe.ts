@@ -28,8 +28,7 @@ export function versionError(version: string | undefined) {
   return new Error(`${message} Run \`claude update\`.`)
 }
 
-// Starts `claude` with an input that never sends a message, reads what it reports at start-up, then stops it.
-// No model call is made, so no tokens are used.
+// The input never sends a message, so no model call is made and no tokens are used.
 export const run = Effect.fn("ClaudeProbe.run")(function* (options: Options) {
   const stop = Promise.withResolvers<void>()
   return yield* Effect.acquireUseRelease(
@@ -83,7 +82,6 @@ const discoverContext = Effect.fn("ClaudeProbe.discoverContext")(
   }),
 )
 
-// Logged in with a Claude subscription, so calls use plan limits rather than API billing
 export function isSubscription(account: AccountInfo) {
   if (account.apiProvider !== undefined && account.apiProvider !== "firstParty") return false
   if (account.apiKeySource !== undefined) return false

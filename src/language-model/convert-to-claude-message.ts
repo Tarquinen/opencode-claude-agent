@@ -3,7 +3,7 @@ export * as ConvertToClaudeMessage from "./convert-to-claude-message.js"
 import type { LanguageModelV3FilePart, LanguageModelV3Prompt } from "@ai-sdk/provider"
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages"
 
-// A fresh/throwaway query has no history. Preserve roles as text, and attachments as real content blocks.
+// Claude can't be given earlier turns, so their roles become text tags. Attachments stay real content blocks.
 export function content(prompt: LanguageModelV3Prompt): ContentBlockParam[] {
   const blocks: ContentBlockParam[] = []
   const history = prompt.some((message) => message.role === "assistant" || message.role === "tool")

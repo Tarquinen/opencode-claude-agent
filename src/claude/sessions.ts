@@ -62,8 +62,6 @@ const attempt = <A>(run: () => Promise<A>) => Effect.tryPromise({
   catch: (error) => error instanceof Error ? error : new Error(String(error)),
 })
 
-// Created once by the plugin factory, outside setup's Scope. Reloading setup can adopt the same processes.
-// Tests create their own registry, rather than sharing module/global state.
 export type Registry = ReturnType<typeof registry>
 
 export function registry() {
@@ -77,7 +75,6 @@ export function registry() {
     const process = entry.process
     if (!process) return
     yield* attempt(() => process.interrupt())
-    // Resolving handlers before interrupt-and-drain could start another model request.
     entry.pending?.clear()
     entry.waiting = undefined
   }, Effect.uninterruptible)
@@ -129,21 +126,18 @@ export function registry() {
       handover = yield* Effect.sleep(HANDOVER_MS).pipe(Effect.andThen(closeEntries()), Effect.forkDetach)
     }))
 
-    // run() decides whether the old process can be reused before collecting pending tool results.
     const open = Effect.fn("ClaudeSessions.open")(function* (entry: Entry, request: Request) {
-      const system = JSON.stringify(request.system)
-      const tools = request.tools ?? []
-      const key = JSON.stringify(tools)
       if (!entry.process) {
         const executable = input.options.claudePath ?? input.io.which()
         if (!executable) return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
+        const tools = request.tools ?? []
         entry.model = request.model
         entry.effort = request.effort
         entry.maxOutputTokens = request.maxOutputTokens
-        entry.system = system
+        entry.system = JSON.stringify(request.system)
         const pending = PendingTools.make()
         entry.pending = pending
-        entry.tools = key
+        entry.tools = JSON.stringify(tools)
         const options = ClaudeQueryOptions.base({ executable, io: input.io })
         if (request.maxOutputTokens !== undefined) options.env = { ...options.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(request.maxOutputTokens) }
         entry.process = yield* Effect.try(() => ClaudeSession.start({
@@ -239,7 +233,6 @@ export function registry() {
       )
     })
 
-    // Side calls stop their process right away. Primary sessions keep it until the idle timeout.
     const release = Effect.fn("ClaudeSessions.release")(function* (entry: Entry, request: Request) {
       entry.active = undefined
       if (!request.sessionID) {
@@ -316,7 +309,6 @@ export function registry() {
             else if (!previous) start = yield* snapshot(current, request)
           } else if (!current.process && current.record
             && !(yield* attempt(() => input.io.sessionExists(current.record!.claudeSessionID)))) {
-            yield* stop(current)
             current.record = undefined
             start = 0
           }
@@ -329,8 +321,8 @@ export function registry() {
               results = undefined
               start = 0
             } else if (results.aborted) {
-              // OpenCode ended this turn. Start the next one normally, with its saved results as catch-up.
-              // Active-turn steering still uses the SDK queue; it is not a substitute for a fresh user turn.
+              // OpenCode ended this turn. Start a fresh user turn with the saved results as catch-up;
+              // queueing input with addUser only steers a turn that is still running.
               yield* interrupt(current)
               results = undefined
             }

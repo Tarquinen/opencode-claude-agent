@@ -26,7 +26,6 @@ export const Plugin = define<Scope.Scope | ClaudeStatus.Service>({
       })
     })
 
-    // Show a sign-in problem on the connection when `claude` is missing or logged out
     yield* SubscriptionRef.changes(status.state).pipe(
       Stream.runForEach((state) =>
         Effect.gen(function* () {

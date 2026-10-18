@@ -6,7 +6,7 @@ const Checkpoint = Schema.Struct({ hash: Schema.String, claudeMessageID: Schema.
 export type Checkpoint = typeof Checkpoint.Type
 const Record = Schema.Struct({
   claudeSessionID: Schema.String,
-  // An ID can be durable before a turn is fully synchronized. Old phase-2 records have no history.
+  // The ID is saved even when a step is cancelled or fails; only a completed step saves history.
   history: Schema.optional(Schema.Array(Checkpoint)),
 })
 export type Record = typeof Record.Type

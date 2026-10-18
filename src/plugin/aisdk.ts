@@ -3,7 +3,7 @@ export * as ClaudeAISDK from "./aisdk.js"
 import { define } from "@opencode/plugin/effect/plugin"
 import { Effect, Scope } from "effect"
 import { ClaudeSessions } from "../claude/sessions.js"
-import { ClaudeCodeProvider } from "../language-model/claude-code-provider.js"
+import { ClaudeCodeLanguageModel } from "../language-model/claude-code-language-model.js"
 import { ClaudeProvider } from "./provider.js"
 
 export const Plugin = define<Scope.Scope | ClaudeSessions.Service>({
@@ -16,10 +16,13 @@ export const Plugin = define<Scope.Scope | ClaudeSessions.Service>({
       "sdk",
       (evt) =>
         Effect.sync(() => {
-          // Always replace: until the opencode fix ships, the npm fallback has already set the placeholder here
-          evt.sdk = ClaudeCodeProvider.createClaudeCode({
+          const dependencies: ClaudeCodeLanguageModel.Dependencies = {
             run: (request, signal) => run(sessions.run(request), { signal }),
-          })
+          }
+          // Always replace: until the opencode fix ships, the npm fallback has already set the placeholder here
+          evt.sdk = {
+            languageModel: (modelID: string) => new ClaudeCodeLanguageModel.Model(modelID, dependencies),
+          }
         }),
       { providerID: ClaudeProvider.ID },
     )

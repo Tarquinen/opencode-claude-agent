@@ -13,7 +13,6 @@ export type State =
   | { readonly type: "ready"; readonly probe: ClaudeProbe.Result; readonly warning?: string }
 
 export interface Interface {
-  // What the last login check found. Features watch this to update models and the login method.
   readonly state: SubscriptionRef.SubscriptionRef<State>
   readonly refresh: () => Effect.Effect<void>
 }

@@ -18,13 +18,11 @@ export const Plugin = define<Scope.Scope>({
         if (session.fork) event.headers[RequestKind.FORK_HEADER] = session.fork.sessionID
       }
     }), { providerID: ClaudeProvider.ID })
-    // Let Claude choose its normal output budget. Later hooks can still set an explicit maxTokens.
-    // Compaction keeps OpenCode's summary budget; titles and generate already omit the automatic limit.
     yield* ctx.session.hook("context", (event) => Effect.sync(() => {
+      // Let Claude choose its normal output budget. Later hooks can still set an explicit maxTokens.
+      // Compaction keeps OpenCode's summary budget; titles and generate already omit the automatic limit.
       delete event.options.maxTokens
-    }), { providerID: ClaudeProvider.ID })
-    // OpenCode's AI SDK bridge lowers error results to plain text. Preserve their status before that conversion.
-    yield* ctx.session.hook("context", (event) => Effect.sync(() => {
+      // OpenCode's AI SDK bridge lowers error results to plain text. Preserve their status before that conversion.
       for (let i = 0; i < event.messages.length; i++) {
         const message = event.messages[i]!
         const content = [...message.content]

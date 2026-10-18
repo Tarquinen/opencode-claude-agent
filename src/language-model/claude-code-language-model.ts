@@ -11,7 +11,6 @@ export interface Dependencies {
   readonly run: (request: Parameters<ClaudeSessions.Interface["run"]>[0], signal: AbortSignal) => Promise<void>
 }
 
-// The AI SDK model opencode calls for each step. Each call becomes one Claude call (PLAN.md, "What one step looks like").
 export class Model implements LanguageModelV3 {
   readonly specificationVersion = "v3"
   readonly provider = "claude-code"

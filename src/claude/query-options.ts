@@ -18,7 +18,6 @@ const ISOLATION_ENV = {
   CLAUDE_CODE_EFFORT_LEVEL: undefined,
 }
 
-// The settings every query starts from: the user's `claude`, opencode's tools only, and nothing from ~/.claude.
 export function base(input: { executable: string; io: ClaudeIO.Interface }): Options {
   return {
     pathToClaudeCodeExecutable: input.executable,
@@ -26,7 +25,7 @@ export function base(input: { executable: string; io: ClaudeIO.Interface }): Opt
     env: { ...input.io.env(), ...ISOLATION_ENV },
     settingSources: [],
     settings: { disableAllHooks: true },
-    // Request visible thinking summaries so OpenCode has reasoning text to display.
+    // Without summaries, OpenCode has no reasoning text to display
     thinking: { type: "adaptive", display: "summarized" },
     strictMcpConfig: true,
     skills: [],

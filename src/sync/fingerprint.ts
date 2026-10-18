@@ -10,7 +10,6 @@ export interface Group {
   readonly end: number
 }
 
-// Object key order, provider metadata and thinking do not change the visible conversation.
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
   if (value !== null && typeof value === "object") {
@@ -28,6 +27,7 @@ function hash(value: unknown) {
   return createHash("sha256").update(canonical(value)).digest("hex")
 }
 
+// opencode sends thinking and provider options differently depending on the target model, so they don't count.
 function visible(message: Exclude<LanguageModelV3Message, { role: "system" }>) {
   const parts: unknown[] = []
   let text = ""

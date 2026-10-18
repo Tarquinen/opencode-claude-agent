@@ -89,7 +89,7 @@ export function start(options: Options) {
     input.enqueue({ type: "user", uuid, message: { role: "user", content }, parent_tool_use_id: null })
   }
 
-  async function read(emit: (message: SDKMessage) => void, step: boolean): Promise<SDKResultMessage | "tools"> {
+  async function readStep(emit: (message: SDKMessage) => void): Promise<SDKResultMessage | "tools"> {
     const active = turn
     if (!active) throw new Error("No Claude turn to read")
     let tools = false
@@ -104,7 +104,7 @@ export function start(options: Options) {
       if (message.type === "assistant" && message.parent_tool_use_id === null) {
         for (const part of message.message.content) if (part.type === "tool_use") tools = true
       }
-      if (step && tools && message.type === "stream_event" && message.parent_tool_use_id === null && message.event.type === "message_stop") return "tools"
+      if (tools && message.type === "stream_event" && message.parent_tool_use_id === null && message.event.type === "message_stop") return "tools"
       if (message.type === "result") return message
     }
   }
@@ -116,11 +116,7 @@ export function start(options: Options) {
     get persisted() { return persisted },
     get running() { return !!turn && !turn.finished },
     begin,
-    readStep: (emit: (message: SDKMessage) => void) => read(emit, true),
-    async send(content: SDKUserMessage["message"]["content"], emit: (message: SDKMessage) => void, uuid = crypto.randomUUID()) {
-      begin(content, uuid)
-      return await read(emit, false) as SDKResultMessage
-    },
+    readStep,
     addUser(content: SDKUserMessage["message"]["content"], uuid: NonNullable<SDKUserMessage["uuid"]>) {
       input.enqueue({ type: "user", uuid, priority: "next", message: { role: "user", content }, parent_tool_use_id: null })
     },

@@ -28,7 +28,6 @@ const loggedOutIO = Effect.gen(function* () {
   return { ...ClaudeIO.real, env: () => ({ ...process.env, CLAUDE_CONFIG_DIR: config }) } satisfies ClaudeIO.Interface
 })
 
-// One login check with the real `claude`
 const probe = (io: ClaudeIO.Interface) => {
   const executable = io.which()
   if (!executable) throw new Error("claude is not on PATH")

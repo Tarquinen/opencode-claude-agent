@@ -52,7 +52,6 @@ export const connect = Effect.fn("TestOpenCode.connect")(function* (opencode: Cl
   })
 })
 
-// IDs of the Claude Code models opencode offers
 export const models = Effect.fn("TestOpenCode.models")(function* (opencode: Client) {
   const list = yield* opencode.model.list()
   const ids: string[] = []

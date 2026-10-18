@@ -41,7 +41,7 @@ describe.skipIf(!live)("tools against real Claude", () => {
     yield* Effect.promise(() => parked.settled)
     const transcript = yield* Effect.promise(() => getSessionMessages(parked.session.id, { dir: directory }))
     expect(JSON.stringify(transcript)).toContain('"is_error":true')
-    const result = yield* Effect.promise(() => parked.session.send("Do not call tools. Reply only with WAITING-OTTER.", () => {}))
+    const result = yield* Effect.promise(() => TestSessions.send(parked.session, "Do not call tools. Reply only with WAITING-OTTER."))
     expect(result.subtype).toBe("success")
     if (result.subtype === "success") expect(result.result.trim()).toBe("WAITING-OTTER")
     console.log("Live waiting-handler cancellation model calls: 2")

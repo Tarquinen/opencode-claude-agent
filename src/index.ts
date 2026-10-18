@@ -15,15 +15,14 @@ const features: readonly Plugin<Scope.Scope | ClaudeStatus.Service | ClaudeSessi
   ClaudeInstructions.Plugin,
 ]
 
-// Tests pass a fake ClaudeIO. Config options can't hold functions, so this is the only way in.
-// The registry lives outside setup's scope, so a reload can adopt its processes. Restart tests pass
-// their own, so they can close it as an exiting opencode process would.
+// Tests pass a fake ClaudeIO here, because config options can't hold functions.
+// The registry lives outside setup's scope, so a reload can adopt its processes.
+// Restart tests pass their own and close it, as an exiting opencode would.
 export const make = (io: ClaudeIO.Interface, registry = ClaudeSessions.registry()) =>
   define({
     id: "claude-code",
     effect: Effect.fn("ClaudeCode.Plugin")(function* (ctx) {
       const options = yield* ClaudeCodeOptions.decode(ctx.options).pipe(Effect.orDie)
-      // Built once and shared, so every feature sees the same login state
       const status = yield* ClaudeStatus.make({ options, io })
       const sessions = yield* registry.attach({ options, io, storage: ctx.storage, directory: ctx.location.directory })
       for (const feature of features) {

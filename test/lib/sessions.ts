@@ -1,7 +1,9 @@
 export * as TestSessions from "./sessions.js"
 
 import type { LanguageModelV3Prompt, LanguageModelV3StreamPart } from "@ai-sdk/provider"
+import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import { Effect } from "effect"
+import type { ClaudeSession } from "../../src/claude/session.js"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
 import { ClaudeCodeLanguageModel } from "../../src/language-model/claude-code-language-model.js"
 import { RequestKind } from "../../src/language-model/request-kind.js"
@@ -44,6 +46,15 @@ export const start = Effect.fn(function* (claude: FakeClaude.Fake, saved = stora
   const sessions = yield* registry.attach(input)
   return { registry, input, model: yield* model(sessions), storage: saved }
 })
+
+// Direct SDK experiments supply their own tool handlers and read through every step to the result.
+export async function send(session: ClaudeSession.Interface, content: SDKUserMessage["message"]["content"]) {
+  session.begin(content)
+  for (;;) {
+    const result = await session.readStep(() => {})
+    if (result !== "tools") return result
+  }
+}
 
 export function stream(model: ClaudeCodeLanguageModel.Model, prompt: LanguageModelV3Prompt, sessionID = "session-a", kind: RequestKind.Kind = "primary") {
   return Effect.promise(() => model.doStream({ prompt, headers: { [RequestKind.SESSION_HEADER]: sessionID, [RequestKind.HEADER]: kind } }))

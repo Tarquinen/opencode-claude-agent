@@ -9,6 +9,7 @@ import { ClaudeProbe } from "../../src/claude/probe.js"
 import { ClaudeQueryOptions } from "../../src/claude/query-options.js"
 import { ClaudeSession } from "../../src/claude/session.js"
 import { ClaudeSystemPrompt } from "../../src/language-model/system-prompt.js"
+import { TestSessions } from "../lib/sessions.js"
 
 // Separate opt-in: compatibility experiments, not part of the usual live regression suite.
 const live = !process.env.CI && process.env.CLAUDE_PROMPT_MATRIX === "1"
@@ -77,7 +78,7 @@ describe.skipIf(!live)("system prompt compatibility", () => {
           return { content: [{ type: "text" as const, text: "COPPER-OTTER" }] }
         }
         // Fixture tools return text only. This checks SDK tool registration and prompt compatibility,
-        // not the phase 4 OpenCode bridge, which is not implemented yet.
+        // not the OpenCode tool bridge.
         const server = item.tools ? createSdkMcpServer({ name: "opencode", tools: [
           tool("read", "Read a fixture file.", { path: z.string() }, reply),
           tool("execute", "Execute a Code Mode query against the fixture project.", { code: z.string() }, reply),
@@ -94,7 +95,7 @@ describe.skipIf(!live)("system prompt compatibility", () => {
           const prompt = item.tools
             ? "Use the read tool to read marker.txt, then reply only with the marker it returns."
             : "Reply only with the marker COPPER-OTTER. Do not use tools."
-          const result = await session.send(prompt, () => {})
+          const result = await TestSessions.send(session, prompt)
           const passed = result.subtype === "success" && !result.is_error && result.result.includes("COPPER-OTTER")
             && (!item.tools || toolCalls > 0)
           console.log(JSON.stringify({ name: item.name, version: probe.version, characters: JSON.stringify(item.system).length,

@@ -20,7 +20,6 @@ type CatalogModel = typeof CatalogModel.Type
 const Catalog = Schema.Array(CatalogModel)
 const CATALOG_KEY = "models"
 
-// Shown on a new install until the first login check finishes
 const FALLBACK: readonly CatalogModel[] = [
   { id: "opus", name: "Opus", efforts: [] },
   { id: "sonnet", name: "Sonnet", efforts: [] },
@@ -46,7 +45,6 @@ export const Plugin = define<Scope.Scope | ClaudeStatus.Service>({
       })
     })
 
-    // Replace the saved list with what `claude` reports, and save it for the next start
     yield* SubscriptionRef.changes(status.state).pipe(
       Stream.runForEach((state) =>
         Effect.gen(function* () {
@@ -83,7 +81,6 @@ function toModel(model: CatalogModel): Model.Info {
     // opencode picks the title model by family (Model.small in packages/core/src/model.ts)
     family: model.id.includes("haiku") ? Model.Family.make("claude-haiku") : undefined,
     capabilities: { tools: true, input: ["text", "image", "pdf"], output: ["text"] },
-    // Each effort level is a variant, sent to our model as a provider option
     variants: model.efforts.map((effort) => ({ id: Model.VariantID.make(effort), settings: { effort } })),
     // Covered by the subscription
     cost: [],
