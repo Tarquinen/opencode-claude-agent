@@ -42,13 +42,12 @@ interface Entry {
   record?: SessionRecord.Record
   model?: string
   effort?: Options["effort"]
-  maxOutputTokens?: number
-  system?: string
+  // Settings that need a new process to change. Model and effort change on the running one.
+  launch?: string
   idle?: Fiber.Fiber<void, never>
   active?: Fiber.Fiber<unknown, unknown>
   pending?: PendingTools.Interface
   waiting?: string[]
-  tools?: string
 }
 
 export interface Interface {
@@ -56,6 +55,8 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("claude-code/Sessions") {}
+
+const launch = (request: Request) => JSON.stringify([request.maxOutputTokens, request.system, request.tools])
 
 const toError = (error: unknown) => error instanceof Error ? error : new Error(String(error))
 const attempt = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: toError })
@@ -130,11 +131,9 @@ export function registry() {
         if (!executable) return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
         entry.model = request.model
         entry.effort = request.effort
-        entry.maxOutputTokens = request.maxOutputTokens
-        entry.system = JSON.stringify(request.system)
+        entry.launch = launch(request)
         const pending = PendingTools.make()
         entry.pending = pending
-        entry.tools = JSON.stringify(request.tools)
         const options = ClaudeQueryOptions.base({ executable, io: input.io })
         if (request.maxOutputTokens !== undefined) options.env = { ...options.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(request.maxOutputTokens) }
         entry.process = yield* Effect.try(() => ClaudeSession.start({
@@ -290,8 +289,7 @@ export function registry() {
         current.active = yield* Effect.withFiber(Effect.succeed)
         // Retire an exited or incompatible process before choosing how to deliver tool results.
         // open() must not replace a process after we have chosen to continue its parked turn.
-        if (current.process?.ended || current.maxOutputTokens !== request.maxOutputTokens
-          || current.system !== JSON.stringify(request.system) || current.tools !== JSON.stringify(request.tools)) yield* stop(current)
+        if (current.process?.ended || current.launch !== launch(request)) yield* stop(current)
         let start = 0
         let results: ReturnType<typeof ToolResult.collect> | undefined
         if (request.sessionID) {
