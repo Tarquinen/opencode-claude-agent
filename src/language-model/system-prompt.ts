@@ -3,10 +3,13 @@ export * as ClaudeSystemPrompt from "./system-prompt.js"
 import type { Options } from "@anthropic-ai/claude-agent-sdk"
 import type { LanguageModelV3Prompt } from "@ai-sdk/provider"
 
-// Custom agent roles and project instructions are added in phase 6.
+export const AGENT_OPTION = "claudeCodeAgent"
+
 export const primary = {
   type: "preset",
   preset: "claude_code",
+  // Agent changes must take effect when a process resumes the same native session.
+  snapshot: false,
   append: "<runtime_info>You are running in OpenCode through the Claude Code harness. Mention this only when asked.</runtime_info>",
 } satisfies Options["systemPrompt"]
 
@@ -17,8 +20,9 @@ Use execute for Code Mode tools exactly as the catalog below specifies. Names in
 Use the skill tool to load a relevant skill before following its workflow. Tool and catalog updates in the conversation supersede earlier definitions.
 </opencode_tools>`
 
-export function make(prompt: LanguageModelV3Prompt, hasTools: boolean) {
+export function make(prompt: LanguageModelV3Prompt, hasTools: boolean, role?: string) {
   const blocks = [primary.append]
+  if (role) blocks.push("# Agent role (from OpenCode)\n" + role)
   if (hasTools) blocks.push(routing)
   for (const message of prompt) {
     if (message.role !== "system") continue
@@ -34,6 +38,13 @@ export function make(prompt: LanguageModelV3Prompt, hasTools: boolean) {
     if (catalog >= 0) {
       const end = text.indexOf("\n\n", catalog + "## Available tools\n\n".length)
       blocks.push(text.slice(start, end < 0 ? undefined : end).trim())
+    }
+    // OpenCode renders discovered/configured instruction files together, immediately
+    // before its date/environment block. Preserve their full text, including blank lines.
+    const instructions = text.search(/^Instructions from: /m)
+    if (instructions >= 0) {
+      const end = text.indexOf("\n\nToday's date:", instructions)
+      blocks.push("# Project instructions (loaded by OpenCode)\n" + text.slice(instructions, end < 0 ? undefined : end).trim())
     }
   }
   return { ...primary, append: blocks.join("\n\n") }

@@ -18,11 +18,11 @@ export const Plugin = define<Scope.Scope | ClaudeStatus.Service>({
 
     yield* ctx.integration.transform((editor) => {
       editor.update(ClaudeProvider.ID, (integration) => {
-        integration.name = "Claude Code"
+        integration.name = "Claude Agent"
       })
       editor.method.update({
         integrationID: ClaudeProvider.ID,
-        method: { id: METHOD_ID, type: "external", label: "Claude Code login (run `claude auth login` first)" },
+        method: { id: METHOD_ID, type: "external", label: "Use existing Claude Code login (`claude auth login`)" },
       })
     })
 
@@ -63,6 +63,7 @@ function problem(state: ClaudeStatus.State): Connection.Status | undefined {
       url: "https://code.claude.com/docs/en/setup",
     }
   if (state.type === "failed") return { status: "needs_auth", message: `Claude Code login check failed: ${state.message}` }
+  if (state.type === "ready" && state.warning) return { status: "needs_auth", message: state.warning }
   if (state.type === "ready" && !ClaudeProbe.isSubscription(state.probe.account))
     return { status: "needs_auth", message: "Run `claude auth login` in a terminal and sign in with your Claude plan." }
   return undefined

@@ -10,11 +10,19 @@ import { TestOpenCode } from "../lib/opencode.js"
 import { Recorder } from "../lib/recorder.js"
 
 describe("embedded text chat", () => {
-  it.live("reports a terminal Claude failure once instead of retrying the turn", () => Effect.gen(function* () {
-    // Replay a real terminal error; the retry policy applies after Claude Code has finished its own retries.
-    const result = Recorder.result("text-cancel")
-    if (result.subtype === "success") throw new Error("Expected an error recording")
-    const failed = { ...FakeClaude.expectTurn(), replies: [result] }
+  const canceled = Recorder.result("text-cancel")
+  if (canceled.subtype === "success") throw new Error("Expected an error recording")
+  const limit = { ...Recorder.result("branch-error", 2), subtype: "success", api_error_status: 429, result: "Usage limit reached." }
+  const rate = { type: "rate_limit_event", uuid: crypto.randomUUID(), session_id: crypto.randomUUID(),
+    rate_limit_info: { status: "rejected", rateLimitType: "seven_day", resetsAt: 1792800000 } }
+  const empty = { ...Recorder.result("text"), subtype: "success", is_error: false, result: "", api_error_status: 529 }
+  for (const fixture of [
+    { name: "cancellation", replies: [canceled], message: canceled.errors.join("\n") },
+    { name: "subscription exhaustion", replies: [rate, limit], message: new Date(rate.rate_limit_info.resetsAt * 1000).toISOString() },
+    { name: "empty overloaded success", replies: [empty], message: "Anthropic is overloaded (529)" },
+  ]) it.live(`reports ${fixture.name} once instead of retrying the turn`, () => Effect.gen(function* () {
+    // Fault-inject documented terminal fields: do not exhaust a real subscription to test its UI path.
+    const failed = { ...FakeClaude.expectTurn(), replies: fixture.replies }
     const claude = FakeClaude.make([FakeClaude.expectStartup(), failed, FakeClaude.expectInterrupt()], { probes: true })
     const registry = ClaudeSessions.registry()
     yield* Effect.addFinalizer(() => registry.close())
@@ -29,7 +37,7 @@ describe("embedded text chat", () => {
     const history = yield* test.opencode.session.export({ sessionID: session.id })
     const assistant = history.messages.find((message) => message.type === "assistant")
     expect(assistant?.finish).toBe("error")
-    expect(assistant?.error?.message).toBe(result.errors.join("\n"))
+    expect(assistant?.error?.message).toContain(fixture.message)
     const calls = claude.runs.filter((run) => run.args.includes("--include-partial-messages"))
     expect(calls).toHaveLength(1)
     expect(calls[0]!.received.filter((message) => message.type === "user")).toHaveLength(1)

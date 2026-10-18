@@ -2,6 +2,7 @@ export * as ClaudeCodeLanguageModel from "./claude-code-language-model.js"
 
 import type { LanguageModelV3, LanguageModelV3CallOptions, LanguageModelV3StreamResult } from "@ai-sdk/provider"
 import type { ClaudeSessions } from "../claude/sessions.js"
+import type { EffortLevel } from "@anthropic-ai/claude-agent-sdk"
 import { ConvertClaudeStream } from "./convert-claude-stream.js"
 import { RequestKind } from "./request-kind.js"
 import { ClaudeSystemPrompt } from "./system-prompt.js"
@@ -34,6 +35,11 @@ export class Model implements LanguageModelV3 {
     const kind = headers.get(RequestKind.HEADER)
     const primary = kind === "primary"
     const branch = kind === "generate" || kind === "compaction"
+    const role = options.providerOptions?.["claude-code"]?.[ClaudeSystemPrompt.AGENT_OPTION]
+    const effort = options.providerOptions?.["claude-code"]?.effort
+    if (effort !== undefined && (typeof effort !== "string" || !["low", "medium", "high", "xhigh", "max"].includes(effort))) {
+      throw new Error("Claude Code effort must be low, medium, high, xhigh or max")
+    }
     let cancelled = false
     let task: Promise<void>
     const stream = new ReadableStream({
@@ -45,10 +51,11 @@ export class Model implements LanguageModelV3 {
             : branch ? headers.get(RequestKind.SESSION_HEADER) ?? undefined : undefined,
           compaction: kind === "compaction",
           model: this.modelId,
+          effort: effort as EffortLevel | undefined,
+          maxOutputTokens: options.maxOutputTokens,
           // Conversation branches keep the Claude prompt. OpenCode supplies their task as user input.
           // Titles are standalone tasks with their own system instructions.
-          system: primary ? ClaudeSystemPrompt.make(options.prompt, tools.length > 0)
-            : branch ? { ...ClaudeSystemPrompt.make(options.prompt, false), snapshot: false }
+          system: primary || branch ? ClaudeSystemPrompt.make(options.prompt, primary && tools.length > 0, typeof role === "string" ? role : undefined)
             : ClaudeSystemPrompt.utility(options.prompt),
           prompt: options.prompt,
           tools: primary ? tools : [],

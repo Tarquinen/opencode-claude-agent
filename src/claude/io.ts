@@ -17,7 +17,7 @@ export interface Interface {
 }
 
 export const real: Interface = {
-  which: () => Bun.which("claude") ?? undefined,
+  which: () => Bun.which(process.platform === "win32" ? "claude.exe" : "claude") ?? undefined,
   env: () => process.env,
   sessionExists: async (sessionID) => (await getSessionInfo(sessionID)) !== undefined,
   fork: ClaudeFork.create,

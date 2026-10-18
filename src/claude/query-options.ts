@@ -14,6 +14,8 @@ const ISOLATION_ENV = {
   MAX_MCP_OUTPUT_TOKENS: "200000",
   // Skips OAuth, so the subscription would not be used
   CLAUDE_CODE_SIMPLE: undefined,
+  // OpenCode's selected effort must win over a shell-level Claude override.
+  CLAUDE_CODE_EFFORT_LEVEL: undefined,
 }
 
 // The settings every query starts from: the user's `claude`, opencode's tools only, and nothing from ~/.claude.

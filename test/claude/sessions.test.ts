@@ -4,6 +4,7 @@ import { TestClock } from "effect/testing"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
 import { ClaudeCodeLanguageModel } from "../../src/language-model/claude-code-language-model.js"
 import { ClaudeSystemPrompt } from "../../src/language-model/system-prompt.js"
+import { RequestKind } from "../../src/language-model/request-kind.js"
 import { it } from "../lib/effect.js"
 import { FakeClaude } from "../lib/fake-claude.js"
 import { TestSessions } from "../lib/sessions.js"
@@ -231,19 +232,48 @@ describe("Claude sessions", () => {
     claude.check()
   }))
 
-  it.effect("switching model restarts the process and resumes the same Claude session", () => Effect.gen(function* () {
-    const claude = FakeClaude.make([FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt(),
-      FakeClaude.expectStartup(), FakeClaude.expectTurn({ recording: "text-resume" }), FakeClaude.expectInterrupt()])
+  it.effect("changes model and effort live, and resumes when the output limit changes or is cleared", () => Effect.gen(function* () {
+    const controls = FakeClaude.replay("controls").filter((step) => step.type === "exchange"
+      && ["set_model", "apply_flag_settings"].includes(step.input.request?.subtype))
+    const recorded = (index: number) => FakeClaude.expectTurn({ recording: "controls", index })
+    const claude = FakeClaude.make([FakeClaude.expectStartup(), recorded(0), controls[0]!, recorded(1),
+      controls[1]!, recorded(2), controls[2]!, controls[3]!, recorded(3), FakeClaude.expectInterrupt(),
+      FakeClaude.expectStartup(), recorded(4), FakeClaude.expectInterrupt(),
+      FakeClaude.expectStartup(), recorded(4), FakeClaude.expectInterrupt()])
     const test = yield* TestSessions.start(claude)
-    yield* TestSessions.reply(test.model, first)
+    const prompt = TestSessions.prompt("Remember CONTROL-OTTER. Reply only CONTROL-OTTER.")
+    const settings = [
+      { model: "haiku", effort: "low", maxOutputTokens: 2048 },
+      { model: "haiku", effort: "high", maxOutputTokens: 2048 },
+      { model: "haiku", maxOutputTokens: 2048 },
+      { model: "sonnet", effort: "low", maxOutputTokens: 2048 },
+      { model: "sonnet", effort: "low", maxOutputTokens: 4096 },
+      { model: "sonnet", effort: "low" },
+    ]
+    for (const setting of settings) {
+      const model = new ClaudeCodeLanguageModel.Model(setting.model, test.model.dependencies)
+      const result = yield* Effect.promise(() => model.doStream({ prompt, maxOutputTokens: setting.maxOutputTokens,
+        providerOptions: { "claude-code": setting.effort ? { effort: setting.effort } : {} },
+        headers: { [RequestKind.HEADER]: "primary", [RequestKind.SESSION_HEADER]: "session-a" } }))
+      expect(TestSessions.text(yield* Effect.promise(() => TestSessions.collect(result.stream)))).toBe("CONTROL-OTTER")
+      prompt.push({ role: "assistant", content: [{ type: "text", text: "CONTROL-OTTER" }] },
+        { role: "user", content: [{ type: "text", text: "What was the marker? Reply only with it." }] })
+    }
+    expect(claude.runs).toHaveLength(3)
     const id = claude.runs[0]!.args.find((arg) => arg.startsWith("--session-id="))!.split("=")[1]
-    const sonnet = new ClaudeCodeLanguageModel.Model("sonnet", test.model.dependencies)
-    expect(TestSessions.text(yield* TestSessions.reply(sonnet, TestSessions.followup()))).toBe("COPPER-OTTER")
-    yield* Effect.promise(() => claude.runs[0]!.closed)
-    expect(claude.runs[1]!.args).toContain("--model=sonnet")
-    expect(claude.runs[1]!.args).toContain(`--resume=${id}`)
-    const users = claude.runs[1]!.received.filter((message) => message.type === "user")
-    expect(users[0].message.content).toEqual([{ type: "text", text: "What was the marker? Reply only with it." }])
+    expect(claude.runs[0]!.received.filter((message) => message.type === "user")).toHaveLength(4)
+    const requests = claude.runs[0]!.received.map((message) => message.request)
+    expect(requests).toContainEqual({ subtype: "set_model", model: "sonnet" })
+    expect(requests).toContainEqual({ subtype: "apply_flag_settings", settings: { effortLevel: "high" } })
+    expect(requests).toContainEqual({ subtype: "apply_flag_settings", settings: { effortLevel: null } })
+    expect(claude.runs[0]!.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("2048")
+    expect(claude.runs[1]!.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("4096")
+    expect(claude.runs[2]!.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBeUndefined()
+    for (const run of claude.runs.slice(1)) {
+      expect(run.args).toContain("--model=sonnet")
+      expect(run.args).toContain(`--resume=${id}`)
+      expect(run.received.find((message) => message.type === "user").message.content).toEqual([{ type: "text", text: "What was the marker? Reply only with it." }])
+    }
     yield* test.registry.close()
     claude.check()
   }))

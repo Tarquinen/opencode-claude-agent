@@ -108,4 +108,18 @@ describe("loading the plugin", () => {
       claude.check()
     }),
   )
+
+  it.live("shows an inherited API-key billing warning without exposing the key or blocking models", () => Effect.gen(function* () {
+    const claude = FakeClaude.make([FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt()], { probes: true })
+    const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude, env: { ANTHROPIC_API_KEY: "fixture-secret" } }) })
+    yield* TestOpenCode.connect(test.opencode)
+    const connection = yield* TestOpenCode.waitUntil(TestOpenCode.connection(test.opencode), (value) => !!value?.status)
+    expect(connection?.status?.message).toContain("API billing instead of your subscription")
+    expect(connection?.status?.message).not.toContain("fixture-secret")
+    expect(yield* TestOpenCode.models(test.opencode)).toContain("haiku")
+    const result = yield* test.opencode.generate.text({ prompt: "hello",
+      model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }) })
+    expect(result.text).toBe("COPPER-OTTER")
+    claude.check()
+  }))
 })

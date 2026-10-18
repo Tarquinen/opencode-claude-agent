@@ -205,9 +205,33 @@ The review's broader fork-recovery suggestion was not supported by a normal fail
 
 Verification after the review fix: typecheck, all 71 offline tests, the new live undo/resubmit regression (three model calls), the SDK control above, and `git diff --check` passed. Live checks used Claude Code 2.1.302 / SDK 0.3.301 / Haiku.
 
+### Phase 6: instructions, controls and errors
+
+`test/live/instructions.test.ts` loads a real AGENTS.md and configured instruction file, selects a custom reviewer agent, repeats the request, switches to a writer agent, then returns to build. It edits AGENTS.md and removes the configured file, using public `location.reload()` after each change. Exact marker responses verify each active role/source and removal of stale guidance. Six calls retain one native Claude session; unchanged instructions reuse the process. `instructions.jsonl` records the successful run on Claude Code 2.1.302 / SDK 0.3.301 / Haiku. Before implementation, the same live test could not identify any of the three markers.
+
+`test/opencode/instructions.test.ts` replays the recorded turns through embedded OpenCode and verifies the actual SDK initialization: complete multiline file text, the active role, `snapshot: false`, no replacement coding prompt, and resume of the same native session after agent changes. It also checks transient generate receives the same instructions. The pure prompt test covers multiple instruction sources, including a configured URL, while preserving tool catalogs and skills. OpenCode owns file discovery and instruction updates; the plugin forwards loaded text rather than rereading paths.
+
+The SDK's default system-prompt snapshot survives resume and ignores a changed append (`sdk.d.ts:2415–2458`). Conversation prompts now set `snapshot: false`, so restarting for an agent change actually applies the new role. OpenCode keeps its initial instruction baseline and emits later file changes chronologically (`session/instruction-state.ts`); those updates continue through the existing message converter. The embedded test also verifies edits/removals and actual SDK user inputs, without adding file discovery or instruction-diff logic to the plugin.
+
+The first implementation appended all supplemental OpenCode system context after removing its generic coding prompt. It reproduced the phase-5 `400 Third-party apps now draw from your extra usage, not your plan limits` rejection. A two-call public-SDK control reproduced that rejection with the captured append and succeeded with the planned runtime/tool context, resolved role and loaded file instructions. Both used the Claude preset and `snapshot: false`. Evidence: `/tmp/opencode/phase6-instructions-error.jsonl`, `/tmp/opencode/phase6-prompt-controls.ts`, and `/tmp/opencode/phase6-prompt-controls-results.json`. This does not identify the server-side classifier or establish that any particular wording causes rejection.
+
+The implemented selection follows [OpenChamber's role/file additions at 9fa38cf](https://github.com/openchamber/opencode-claude/blob/9fa38cfac2b7165c01423f583ccfa56239448209/src/proxy.ts#L1457-L1493), while using OpenCode's resolved agent API and already-loaded file contents. [Its instruction helper](https://github.com/openchamber/opencode-claude/blob/9fa38cfac2b7165c01423f583ccfa56239448209/src/opencode-context.ts#L120-L150) independently rereads files; ours does not. [T3 at f1e0a4d](https://github.com/pingdotgg/t3code/blob/f1e0a4d4d0600b2803e311989151c7f89ced3251/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts#L1189-L1195) retains the preset with runtime/orchestration additions. Errors remain visible without a billing-error retry or prompt-rewrite fallback.
+
+`test/live/controls.test.ts` records five exact-marker turns in `controls.jsonl`: Haiku low → high → default effort → Sonnet low, then an output-cap change from 2048 to 4096. The first four share a process; the cap change resumes the same native session in a replacement. Captured public SDK controls include `set_model`, `apply_flag_settings` high and null. Offline session tests also clear the output cap and verify the replacement environment. OpenCode's typed option is `maxTokens`; its AI SDK lowering supplies `maxOutputTokens`. The SDK has no equivalent launch option, so we use the documented `CLAUDE_CODE_MAX_OUTPUT_TOKENS` environment setting and restart on changes; inherited `CLAUDE_CODE_EFFORT_LEVEL` is cleared because it outranks live effort settings.
+
+`test/live/opencode-tools.test.ts` records `max-steps.jsonl`: native `steps: 2` allows one lookup, then OpenCode disables tools and requests a final summary. The plugin drains and resumes without the tool catalog, preserving the saved marker and final-step instruction. Embedded replay asserts one tool call, no offered tools in the final process, and both inputs in catch-up. The pinned SDK cannot reliably replace a same-name in-process MCP catalog, so restart/resume remains the supported path; no new max-step mechanism was needed.
+
+`test/language-model/error.test.ts` uses recorded billing failure plus documented SDK fault injection for quota metadata and `api_error_status` 500/529. It verifies terminal-only errors, reset dates, allowed/overage distinctions, clearing stale rejected metadata, and no false error on genuine empty success. `test/opencode/chat.test.ts` proves cancellation, quota exhaustion and empty overloaded success each produce one stored error and one user request, with no outer retry. `test/opencode/load.test.ts` verifies an inherited `ANTHROPIC_API_KEY` yields a billing warning without exposing its value or blocking models. The public connection API has only a `needs_auth` problem status, so that is where the advisory is exposed. **Host UI limitation:** OpenCode 2.0.32's integration picker renders only “Sign in required”, not the status message (`packages/tui/src/component/dialog-integration.tsx:133–139,221–229`). This was confirmed with a fake key in the isolated TUI; a clear billing-specific warning in that UI needs host support. We do not exhaust a real subscription to test its error path.
+
+Manual TUI acceptance on 2026-10-17 used OpenCode 2.0.32, Claude Code 2.1.302, SDK 0.3.301, Haiku/Sonnet 5.5, and an isolated config/database/project under `/tmp/opencode/phase6-tui-FE0Rim`. The session automatically received a title. Reviewer/Haiku returned `REVIEWER-HERON ROOT-OTTER GUIDE-IBIS`; switching through the agent/model/variant pickers to Writer/Sonnet high returned `WRITER-LYNX ROOT-OTTER GUIDE-IBIS`. Editing AGENTS.md and deleting GUIDE.md while the TUI was open triggered its real watcher and returned `WRITER-LYNX UPDATED-OTTER NONE`. Captures: `roles-model-effort.txt`, `instruction-updates.txt`. A separate isolated TUI using the real plugin/SDK with fake CLI traffic displayed `Claude Code subscription limit reached. Resets at 2026-10-24T00:00:00.000Z.` once; capture `quota-reset.txt` and fixture `quota-plugin/server.ts` preserve the scenario.
+
+The TUI export `session.json` and public-SDK `native-history.json` confirm all real turns used one native Claude session; that owned transcript was deleted after saving evidence. `quota-traffic.json` confirms one conversation process and one user request, with the fake script fully consumed on shutdown. Both isolated TUI processes were closed.
+
+Verification: typecheck, all **79 offline tests**, live instructions (six calls), controls (five), max steps (two), concurrent generate and native compaction (eight), and the TUI checks pass. Recordings contain no account/home identifiers. Windows `claude.exe` lookup is implemented; this Linux environment does not establish Windows runtime acceptance.
+
 ### System-prompt compatibility
 
-`test/live/prompts.test.ts` tests the actual plugin isolation settings with Claude Code's preset and representative additions: tool routing, Code Mode, MCP notes, skills, a custom role, AGENTS.md instructions, all additions together, and a large project appendix. One case registers SDK MCP tools and requires a real tool call. These are fixture tools, not the future OpenCode tool bridge.
+`test/live/prompts.test.ts` tests the actual plugin isolation settings with Claude Code's preset and representative additions: tool routing, Code Mode, MCP notes, skills, a custom role, AGENTS.md instructions, all additions together, and a large project appendix. One case registers SDK MCP tools and requires a real tool call. These isolated fixture tools test SDK prompt compatibility; the OpenCode tool bridge has separate coverage.
 
 Controls try a short custom prompt and OpenCode's base prompt as a replacement and an append. `test/fixtures/opencode-system.txt` snapshots `packages/core/src/session/runner/prompt/system.txt` at OpenCode commit `0a03b4bc9c401330888513d612252350944df33c`, with its tool-guidance placeholder resolved. It is not the complete dynamically assembled TUI prompt. Control failures are reported, rather than failing the supported preset configuration tests.
 
@@ -290,7 +314,7 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | Titles preserve native task system instructions; generate/compaction branches retain the Claude preset and native task user input; all side calls run in independent, non-persistent processes | 1, 2, 4 | 2, 5 |
 | Closing the registry interrupts, drains and closes an active side call, without saving it as a primary session | 2 | 2 |
 | A terminal Claude error is shown once, without opencode replaying the whole turn | 3 | 2 |
-| Switching model restarts the process and resumes the same Claude session | 2 | 2 |
+| Switching Claude model/effort uses live controls; changing or clearing output limits restarts/resumes the same session | 2, 4 | 6 |
 | Text stays verbatim; image and PDF inputs reach Claude as real content blocks | 1, 2, 4 | 2 |
 | A resumed turn preserves the whole newest user group; utility requests preserve instructions and history roles; unsupported media reports a clear error | 1 | 2 |
 | Switching to another model and back catches up only missed text/tool history, then resumes normally | 2, 3, 4 | 3 |
@@ -313,9 +337,11 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | Fork sources survive registry reload; a missing transcript rebuilds from authoritative history | 2 | 5 |
 | Compaction drains a waiting tool call and the next primary request uses the summary alone | 2, 4 | 5 |
 | Concurrent generate calls and cancellation remain isolated; disposable forks are deleted on success, failure and cancellation | 2, 4 | 5 |
-| A changed custom agent role or forwarded project instructions restart the process; unchanged effective Claude instructions do not | 2 | 6 |
-| A "successful" result after server errors (`api_error_status`) becomes an error | 1, 2 | 6 |
-| Plan-limit events: "rejected" vs "allowed", and weekly reset dates | 1 | 6 |
+| Loaded AGENTS.md/configured instructions and resolved agent roles reach primary and generate calls; role changes restart/resume with a fresh system prompt, unchanged instructions reuse the process | 1, 3, 4 | 6 |
+| File edits/removals arrive as OpenCode's chronological instruction updates; live reload and TUI acceptance | 3, 4 | 6 |
+| Native agent max steps drains parked tools, removes the catalog, and summarizes authoritative results | 3, 4 | 6 |
+| A "successful" result after server errors (`api_error_status`) becomes an error without outer retries | 1, 3 | 6 |
+| Plan-limit events: "rejected" vs "allowed", weekly reset dates and a single visible terminal error | 1, 3 | 6 |
 | An `ANTHROPIC_API_KEY` in the environment shows the billing warning | 3 | 6 |
 
 ## Folder layout

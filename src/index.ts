@@ -6,11 +6,13 @@ import { ClaudeSessions } from "./claude/sessions.js"
 import { ClaudeCodeOptions } from "./options.js"
 import { ClaudeAISDK } from "./plugin/aisdk.js"
 import { ClaudeIntegration } from "./plugin/integration.js"
+import { ClaudeInstructions } from "./plugin/instructions.js"
 import { ClaudeProvider } from "./plugin/provider.js"
 import { ClaudeSessionHooks } from "./plugin/session.js"
 
 const features: readonly Plugin<Scope.Scope | ClaudeStatus.Service | ClaudeSessions.Service>[] = [
   ClaudeProvider.Plugin, ClaudeIntegration.Plugin, ClaudeAISDK.Plugin, ClaudeSessionHooks.Plugin,
+  ClaudeInstructions.Plugin,
 ]
 
 // Tests pass a fake ClaudeIO. Config options can't hold functions, so this is the only way in.

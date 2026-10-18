@@ -13,6 +13,41 @@ import { Recorder } from "../lib/recorder.js"
 import { TestPlugin } from "../lib/test-plugin.js"
 
 describe("embedded OpenCode tools", () => {
+  it.live("the native agent step limit removes tools and catches up saved results after draining", () => Effect.gen(function* () {
+    let calls = 0
+    const fixture = define({ id: "steps-fixture", effect: Effect.fn(function* (ctx) {
+      yield* ctx.tool.transform((editor) => editor.add({ name: "lookup", description: "Look up the marker.",
+        input: { type: "object", properties: {} }, options: { codemode: false },
+        execute: () => Effect.sync(() => { calls++; return { content: "STEP-OTTER" } }),
+      }))
+      yield* ctx.session.hook("context", (event) => Effect.sync(() => {
+        for (const name of Object.keys(event.tools)) if (name !== "lookup") delete event.tools[name]
+      }))
+    }) })
+    const claude = FakeClaude.make(FakeClaude.replay("max-steps", { skipProbes: true }), { probes: true })
+    const registry = ClaudeSessions.registry()
+    yield* Effect.addFinalizer(() => registry.close())
+    const { opencode, directory } = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), registry,
+      plugins: [fixture], config: { agents: { build: { steps: 2 } } } })
+    yield* TestOpenCode.connect(opencode)
+    const session = yield* opencode.session.create({ title: "Steps fixture", location: { directory: Location.PublicRef.fields.directory.make(directory) },
+      model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }) })
+    yield* opencode.session.prompt({ sessionID: session.id, text: "Call lookup once. After seeing its result, call lookup again to verify it. Finally report the marker." })
+    yield* opencode.session.wait({ sessionID: session.id })
+    expect(calls).toBe(1)
+    const runs = claude.runs.filter((run) => run.args.includes("--include-partial-messages"))
+    expect(runs).toHaveLength(2)
+    const final = runs[1]!
+    expect(final.received.find((message) => message.request?.subtype === "initialize").request.sdkMcpServers).toBeUndefined()
+    const input = JSON.stringify(final.received.find((message) => message.type === "user").message.content)
+    expect(input).toContain("STEP-OTTER")
+    expect(input).toContain("MAXIMUM STEPS REACHED")
+    const history = yield* opencode.session.export({ sessionID: session.id })
+    expect(history.messages.findLast((message) => message.type === "assistant")?.error).toBeUndefined()
+    yield* registry.close()
+    claude.check()
+  }), 15_000)
+
   it.live("Code Mode preserves multiline namespace descriptions and the following tools", () => Effect.gen(function* () {
     const description = "Customer account tools.\nUse the account ID returned by search for subsequent calls."
     const plugin = define({ id: "catalog-test", effect: Effect.fn(function* (ctx) {

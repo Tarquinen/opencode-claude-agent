@@ -28,6 +28,8 @@ interface Request {
   readonly sourceID?: string
   readonly compaction?: boolean
   readonly model: string
+  readonly effort?: Options["effort"]
+  readonly maxOutputTokens?: number
   readonly system: NonNullable<Options["systemPrompt"]>
   readonly prompt: LanguageModelV3Prompt
   readonly tools?: readonly LanguageModelV3FunctionTool[]
@@ -39,6 +41,8 @@ interface Entry {
   process?: ClaudeSession.Interface
   record?: SessionRecord.Record
   model?: string
+  effort?: Options["effort"]
+  maxOutputTokens?: number
   system?: string
   idle?: Fiber.Fiber<void, never>
   active?: Fiber.Fiber<unknown, unknown>
@@ -134,14 +138,19 @@ export function registry() {
         const executable = input.options.claudePath ?? input.io.which()
         if (!executable) return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
         entry.model = request.model
+        entry.effort = request.effort
+        entry.maxOutputTokens = request.maxOutputTokens
         entry.system = system
         const pending = PendingTools.make()
         entry.pending = pending
         entry.tools = key
+        const options = ClaudeQueryOptions.base({ executable, io: input.io })
+        if (request.maxOutputTokens !== undefined) options.env = { ...options.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(request.maxOutputTokens) }
         entry.process = yield* Effect.try(() => ClaudeSession.start({
-          ...ClaudeQueryOptions.base({ executable, io: input.io }),
+          ...options,
           cwd: input.directory,
           model: request.model,
+          effort: request.effort,
           systemPrompt: request.system,
           includePartialMessages: true,
           persistSession: request.sessionID !== undefined,
@@ -156,6 +165,15 @@ export function registry() {
         Effect.mapError((error) => new Error(String(error))),
         Effect.onError(() => stop(entry).pipe(Effect.ignore)),
       )
+      // Apply controls before sending input or releasing parked tool results.
+      if (entry.model !== request.model) {
+        yield* attempt(() => process.setModel(request.model))
+        entry.model = request.model
+      }
+      if (entry.effort !== request.effort) {
+        yield* attempt(() => process.setEffort(request.effort))
+        entry.effort = request.effort
+      }
       return process
     })
 
@@ -179,7 +197,7 @@ export function registry() {
           && !message.mcp_servers.some((server) => server.name === "opencode" && server.status === "connected")) {
           throw new Error("The OpenCode tool server did not connect to Claude Code")
         }
-        if (message.type === "assistant" && message.parent_tool_use_id === null && !seen.has(message.uuid)) {
+        if (message.type === "assistant" && message.parent_tool_use_id === null && !message.error && !seen.has(message.uuid)) {
           seen.add(message.uuid)
           messageID = message.uuid
           for (const part of message.message.content) {
@@ -282,7 +300,7 @@ export function registry() {
         current.active = yield* Effect.withFiber(Effect.succeed)
         // Retire an exited or incompatible process before choosing how to deliver tool results.
         // open() must not replace a process after we have chosen to continue its parked turn.
-        if (current.process?.ended || current.model !== request.model
+        if (current.process?.ended || current.maxOutputTokens !== request.maxOutputTokens
           || current.system !== JSON.stringify(request.system) || current.tools !== JSON.stringify(request.tools ?? [])) yield* stop(current)
         let start = 0
         let results: ReturnType<typeof ToolResult.collect> | undefined

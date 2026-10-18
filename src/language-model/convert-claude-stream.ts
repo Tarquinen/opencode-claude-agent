@@ -4,9 +4,11 @@ import type { LanguageModelV3FunctionTool, LanguageModelV3StreamPart } from "@ai
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { ClaudeUsage } from "./usage.js"
 import { ToolNames } from "../tools/names.js"
+import { ClaudeCodeError } from "./claude-code-error.js"
 
 export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
   const usage = ClaudeUsage.make()
+  const failure = ClaudeCodeError.make()
   const streamed = new Set<string>()
   const blocks = new Map<number, "text" | "reasoning">()
   let messageID = ""
@@ -15,6 +17,8 @@ export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
 
   return (message: SDKMessage): LanguageModelV3StreamPart[] => {
     const parts: LanguageModelV3StreamPart[] = []
+    const error = failure(message)
+    if (error) return [{ type: "error", error }]
     if (message.type === "stream_event" && message.parent_tool_use_id === null) {
       const event = message.event
       switch (event.type) {
@@ -57,6 +61,8 @@ export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
       }
     }
     if (message.type === "assistant" && message.parent_tool_use_id === null) {
+      // Synthetic API errors are diagnostics, not assistant answers.
+      if (message.error) return parts
       // The complete block carries the transcript UUID, unlike the API message ID on stream events.
       metadata = { "claude-code": { sessionID: message.session_id, messageID: message.uuid } }
       usage.update(message.message.id, message.message.usage)
@@ -76,11 +82,6 @@ export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
       }
     }
     if (message.type === "result") {
-      if (message.subtype !== "success" || message.is_error) {
-        const text = message.subtype === "success" ? message.result : message.errors.join("\n")
-        parts.push({ type: "error", error: new Error(text || "Claude Code could not finish its reply") })
-        return parts
-      }
       if (message.num_turns === 1) usage.result(message.usage)
       parts.push({
         type: "finish",

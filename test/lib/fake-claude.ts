@@ -35,13 +35,13 @@ interface Exchange extends Gates {
 export type Step = Startup | Input | Exchange
 
 // Replay the protocol exchanges of a recorded tool turn, including Claude-initiated hook/MCP requests.
-export function replay(recording: string): Step[] {
+export function replay(recording: string, options: { skipProbes?: boolean } = {}): Step[] {
   const steps: Step[] = []
   let current: Exchange | undefined
   for (const line of Recorder.load(recording)) {
     if (line.from === "sdk") {
       if (line.message.request?.subtype === "initialize") {
-        steps.push(expectStartup({ recording }))
+        if (!options.skipProbes || line.message.request.hooks) steps.push(expectStartup({ recording }))
         current = undefined
       } else {
         current = { type: "exchange", input: line.message, replies: [], started: Promise.withResolvers<void>(), done: Promise.withResolvers<void>() }

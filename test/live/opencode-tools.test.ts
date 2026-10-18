@@ -13,6 +13,48 @@ import { TestOpenCode } from "../lib/opencode.js"
 const live = !process.env.CI && process.env.CLAUDE_LIVE === "1" && Bun.spawnSync(["claude", "auth", "status"]).exitCode === 0
 
 describe.skipIf(!live)("real Claude through OpenCode tools", () => {
+  it.live("stops tool execution at the native agent step limit and summarizes the saved result", () => Effect.gen(function* () {
+    const directory = yield* TestOpenCode.tempDirectory
+    const recorder = Recorder.make("max-steps", true)
+    const registry = ClaudeSessions.registry()
+    yield* Effect.addFinalizer(() => registry.close().pipe(Effect.andThen(Effect.promise(async () => {
+      recorder.save()
+      for (const id of recorder.sessionIDs) if (await ClaudeIO.real.sessionExists(id)) await deleteSession(id, { dir: directory })
+    }))))
+    let calls = 0
+    const fixture = define({ id: "live.steps", effect: Effect.fn(function* (ctx) {
+      yield* ctx.tool.transform((editor) => editor.add({ name: "lookup", description: "Look up the marker.",
+        input: { type: "object", properties: {} }, options: { codemode: false },
+        execute: () => Effect.sync(() => { calls++; return { content: "STEP-OTTER" } }),
+      }))
+      yield* ctx.session.hook("context", (event) => Effect.sync(() => {
+        for (const name of Object.keys(event.tools)) if (name !== "lookup") delete event.tools[name]
+      }))
+    }) })
+    const { opencode } = yield* TestOpenCode.start({ io: { ...ClaudeIO.real, spawn: recorder.spawn }, registry, directory,
+      plugins: [fixture], config: { agents: { build: { steps: 2 } } } })
+    yield* TestOpenCode.connect(opencode)
+    const session = yield* opencode.session.create({ title: "Step limit fixture",
+      location: { directory: Location.PublicRef.fields.directory.make(directory) },
+      model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }) })
+    yield* opencode.session.prompt({ sessionID: session.id,
+      text: "Call lookup once. After seeing its result, call lookup again to verify it. Finally report the marker." })
+    yield* opencode.session.wait({ sessionID: session.id })
+    expect(calls).toBe(1)
+    const history = yield* opencode.session.export({ sessionID: session.id })
+    const reply = history.messages.findLast((message) => message.type === "assistant")!
+    expect(reply.error).toBeUndefined()
+    expect(JSON.stringify(reply)).toContain("STEP-OTTER")
+    const runs = recorder.lines.filter((line) => line.from === "spawn" && line.args.includes("--include-partial-messages"))
+    expect(runs).toHaveLength(2)
+    expect(recorder.sessionIDs.size).toBe(1)
+    const users = recorder.lines.filter((line) => line.from === "sdk" && line.message.type === "user")
+    expect(JSON.stringify(users.at(-1))).toContain("MAXIMUM STEPS REACHED")
+    const init = recorder.lines.filter((line) => line.from === "sdk" && line.message.request?.subtype === "initialize").at(-1)!
+    if (init.from === "sdk") expect(init.message.request.sdkMcpServers).toBeUndefined()
+    console.log("Live max-step model calls: 2")
+  }), 60_000)
+
   it.live("reads, approves an edit, rejects another, and follows the next user message", () => Effect.gen(function* () {
     const directory = yield* TestOpenCode.tempDirectory
     yield* Effect.promise(() => Bun.write(`${directory}/marker.txt`, "OLD-OTTER\n"))

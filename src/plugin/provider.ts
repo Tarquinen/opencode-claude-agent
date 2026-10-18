@@ -37,7 +37,7 @@ export const Plugin = define<Scope.Scope | ClaudeStatus.Service>({
       editor.add({
         info: {
           id: ID,
-          name: "Claude Code",
+          name: "Claude Agent",
           activation: "auto",
           package: `aisdk:${SdkPlaceholder.url}`,
         },

@@ -60,16 +60,21 @@ describe("tool bridge conversion", () => {
     expect(image.replacement).toBeUndefined()
   })
 
-  test("tool instructions preserve Code Mode, MCP notes and skills without copying the generic or custom system prompt", () => {
+  test("the preset receives tool context, explicit roles and complete instruction files", () => {
     const catalog = "# Code Mode\n\nUse execute and search.\n\n## Available tools\n\n- example (1 tool)\n  - tools.example.read({\n      path: string,\n    }): Promise<string>\n"
     const mcp = '<mcp_instructions>\n  <server name="example">Use its documented paths.</server>\n</mcp_instructions>'
     const skills = "Skills provide specialized instructions and workflows for specific tasks.\n<available_skills><skill>fixture</skill></available_skills>"
-    const system = ClaudeSystemPrompt.make([{ role: "system", content: ["GENERIC-OPENCode-PROMPT", catalog, mcp, skills, "Instructions from: AGENTS.md\nCUSTOM-ROLE"].join("\n\n") }], true)
+    const instructions = "Instructions from: AGENTS.md\nPROJECT-RULE\n\n## Style\nKeep it readable.\n\nInstructions from: https://example.com/guide.md\nCONFIGURED-RULE"
+    const system = ClaudeSystemPrompt.make([{ role: "system", content: ["GENERIC-OPENCode-PROMPT", catalog, mcp, skills, instructions,
+      "Today's date: Sat Oct 17 2026\n\n<env>OPENCode-ENVIRONMENT</env>"].join("\n\n") }], true, "CUSTOM-ROLE")
     expect(system.preset).toBe("claude_code")
+    expect(system.snapshot).toBe(false)
     expect(system.append).toContain(catalog.trim())
     expect(system.append).toContain(mcp)
     expect(system.append).toContain(skills)
     expect(system.append).not.toContain("GENERIC-OPENCode-PROMPT")
-    expect(system.append).not.toContain("CUSTOM-ROLE")
+    expect(system.append).toContain("CUSTOM-ROLE")
+    expect(system.append).toContain(instructions)
+    expect(system.append).not.toContain("OPENCode-ENVIRONMENT")
   })
 })

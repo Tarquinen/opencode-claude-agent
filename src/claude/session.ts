@@ -126,5 +126,7 @@ export function start(options: Options) {
     },
     interrupt,
     stop,
+    setModel: (model: string) => session.setModel(model),
+    setEffort: (effort: Options["effort"]) => session.applyFlagSettings({ effortLevel: effort ?? null }),
   }
 }
