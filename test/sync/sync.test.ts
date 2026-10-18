@@ -33,7 +33,7 @@ describe("history reconciliation", () => {
     expect(SyncDecision.boundary(history, noBoundary)).toBeUndefined()
   })
 
-  test("chooses all four cases and never resumes an unverified phase-2 record", () => {
+  test("chooses all four cases and never resumes a record without history", () => {
     expect(SyncDecision.decide([...past, user("Next")], record)).toEqual({ kind: "continue", start: 2 })
     expect(SyncDecision.decide([...past, user("Other model"), assistant("LILAC-HERON"), user("Next")], record)).toEqual({ kind: "catch-up", start: 2 })
     expect(SyncDecision.decide([past[0]!, assistant("Edited"), user("Next")], record)).toEqual({ kind: "changed", start: 0 })
