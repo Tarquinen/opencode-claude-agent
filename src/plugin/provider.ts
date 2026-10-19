@@ -76,9 +76,9 @@ function toModel(model: CatalogModel): Model.Info {
   return {
     ...defaults,
     name: model.name,
-    // The SDK exposes capacity before a prompt, but not output limits. Zero means unknown in OpenCode.
+    // The SDK reports context windows before a prompt, but not output limits. 0 means unknown in OpenCode.
     limit: { context: model.contextWindow ?? defaults.limit.context, output: 0 },
-    // opencode picks the title model by family (Model.small in packages/core/src/model.ts)
+    // OpenCode picks the title model by family (Model.small).
     family: model.id.includes("haiku") ? Model.Family.make("claude-haiku") : undefined,
     capabilities: { tools: true, input: ["text", "image", "pdf"], output: ["text"] },
     variants: model.efforts.map((effort) => ({ id: Model.VariantID.make(effort), settings: { effort } })),

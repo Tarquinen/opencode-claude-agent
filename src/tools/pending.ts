@@ -26,7 +26,10 @@ export function make() {
 
   return {
     expect,
-    before(id: string, name: string) { expect(id, name); next = id },
+    before(id: string, name: string) {
+      expect(id, name)
+      next = id
+    },
     async call(name: string) {
       const id = next
       next = undefined
@@ -47,9 +50,14 @@ export function make() {
       replacements.delete(id)
       return replacement
     },
-    // Only after interrupt-and-drain. Resolving earlier could start another model call.
+    // Call only after interrupt-and-drain; resolving these handlers earlier can start another model call.
     clear() {
-      for (const call of calls.values()) call.result.resolve({ mcp: { isError: true, content: [{ type: "text", text: "Cancelled by user." }] }, replacement: undefined })
+      for (const call of calls.values()) {
+        call.result.resolve({
+          mcp: { isError: true, content: [{ type: "text", text: "Cancelled by user." }] },
+          replacement: undefined,
+        })
+      }
       calls.clear()
       replacements.clear()
       next = undefined

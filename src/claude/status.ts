@@ -26,7 +26,7 @@ export const make = Effect.fn("ClaudeStatus.make")(function* (input: {
   const state = yield* SubscriptionRef.make<State>({ type: "checking" })
   const lock = yield* Semaphore.make(1)
 
-  // Reconnecting must check again after startup, rather than race it with an older account snapshot.
+  // Serialized so a reconnect checks again after startup, rather than racing it with an older account snapshot.
   const refresh = Effect.fn("ClaudeStatus.refresh")(
     function* () {
       const executable = ClaudeQueryOptions.executable(input)

@@ -2,7 +2,6 @@ export * as ClaudeCodeOptions from "./options.js"
 
 import { Schema } from "effect"
 
-// Options from the opencode config: { "package": "...", "options": { ... } }
 export const Options = Schema.Struct({
   // Found on PATH when unset
   claudePath: Schema.optional(Schema.String),

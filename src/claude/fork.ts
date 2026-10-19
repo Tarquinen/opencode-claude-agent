@@ -7,7 +7,7 @@ export interface Result {
   readonly messages: ReadonlyMap<string, string>
 }
 
-// The SDK gives forked messages fresh UUIDs. Match its copied prefix before reusing checkpoints.
+// The SDK gives forked messages fresh UUIDs. Verify the copied prefix before mapping checkpoints onto them.
 export async function create(sessionID: string, messageID: string): Promise<Result | undefined> {
   const source = await getSessionMessages(sessionID)
   const end = source.findIndex((message) => message.uuid === messageID)
