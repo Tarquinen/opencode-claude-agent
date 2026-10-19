@@ -231,7 +231,8 @@ export function registry() {
       entry.active = undefined
       if (!request.sessionID) {
         yield* stop(entry).pipe(Effect.catch((error) => Effect.logWarning(error)))
-        if (entry.record) yield* attempt(() => input.io.remove(entry.record!.claudeSessionID)).pipe(Effect.catch((error) => Effect.logWarning(error)))
+        const sessionID = entry.record?.claudeSessionID
+        if (sessionID) yield* attempt(() => input.io.remove(sessionID)).pipe(Effect.catch((error) => Effect.logWarning(error)))
         temporary.delete(entry)
         return
       }
@@ -260,12 +261,13 @@ export function registry() {
     }, Effect.uninterruptible)
 
     const snapshot = Effect.fn("ClaudeSessions.snapshot")(function* (entry: Entry, request: Request) {
-      if (!request.sourceID) return 0
-      const source = entries.get(request.sourceID)
+      const sourceID = request.sourceID
+      if (!sourceID) return 0
+      const source = entries.get(sourceID)
       const copy = Effect.gen(function* () {
         // Compaction ends the old primary context. Generate only takes a read-only snapshot.
         if (request.compaction && source) yield* stop(source)
-        return yield* branch(entry, request, source?.record ?? (yield* records.get(request.sourceID!)))
+        return yield* branch(entry, request, source?.record ?? (yield* records.get(sourceID)))
       })
       // Hold the source only while copying its settled prefix, never during side-call inference.
       return yield* (source ? source.lock.withPermit(copy) : copy)
@@ -287,10 +289,12 @@ export function registry() {
         entry.record = undefined
         if (decision.kind === "changed") start = yield* branch(entry, request, previous)
         else if (!previous) start = yield* snapshot(entry, request)
-      } else if (!entry.process && entry.record
-        && !(yield* attempt(() => input.io.sessionExists(entry.record!.claudeSessionID)))) {
-        entry.record = undefined
-        start = 0
+      } else if (!entry.process && entry.record) {
+        const sessionID = entry.record.claudeSessionID
+        if (!(yield* attempt(() => input.io.sessionExists(sessionID)))) {
+          entry.record = undefined
+          start = 0
+        }
       }
       const live = entry.process
       if (!live?.session.running || !live.waiting) return { start, results: undefined }

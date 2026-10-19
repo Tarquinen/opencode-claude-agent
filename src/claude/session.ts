@@ -39,22 +39,27 @@ export function start(options: Options) {
         if (message.type === "assistant") persisted = true
         if (message.type === "result") {
           persisted = true
-          if (turn) turn.finished = true
-          turn?.drained.resolve()
+          if (turn) {
+            turn.finished = true
+            turn.drained.resolve()
+          }
         }
       }
     } catch (error) {
       failure = error
     } finally {
       ended = true
-      turn?.drained.reject(failure ?? new Error("Claude Code stopped before finishing its reply"))
-      turn?.wake?.()
+      if (turn) {
+        turn.finished = true
+        turn.drained.resolve()
+        turn.wake?.()
+      }
     }
   })()
 
   async function interrupt() {
     const active = turn
-    if (!active || active.finished) return
+    if (!active || active.finished || ended) return
     await session.interrupt()
     // The interrupt receipt precedes the result and transcript flush. Do not send another turn yet.
     await active.drained.promise
@@ -82,10 +87,7 @@ export function start(options: Options) {
   function begin(content: SDKUserMessage["message"]["content"], uuid = crypto.randomUUID()) {
     if (ended || stopping) throw failure ?? new Error("Claude Code session has stopped")
     if (turn && !turn.finished) throw new Error("Claude Code is still finishing the previous turn")
-    const drained = Promise.withResolvers<void>()
-    // The reader reports process failures too; this promise is also used by interrupt-and-drain.
-    void drained.promise.catch(() => {})
-    turn = { drained, messages: [], finished: false }
+    turn = { drained: Promise.withResolvers<void>(), messages: [], finished: false }
     input.enqueue({ type: "user", uuid, message: { role: "user", content }, parent_tool_use_id: null })
   }
 

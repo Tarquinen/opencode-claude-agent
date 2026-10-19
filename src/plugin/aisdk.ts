@@ -12,13 +12,13 @@ export const Plugin = define<Scope.Scope | ClaudeSessions.Service>({
     const sessions = yield* ClaudeSessions.Service
     const context = yield* Effect.context<never>()
     const run = Effect.runPromiseWith(context)
+    const dependencies: ClaudeCodeLanguageModel.Dependencies = {
+      run: (request, signal) => run(sessions.run(request), { signal }),
+    }
     yield* ctx.aisdk.hook(
       "sdk",
       (evt) =>
         Effect.sync(() => {
-          const dependencies: ClaudeCodeLanguageModel.Dependencies = {
-            run: (request, signal) => run(sessions.run(request), { signal }),
-          }
           // Always replace: until the opencode fix ships, the npm fallback has already set the placeholder here
           evt.sdk = {
             languageModel: (modelID: string) => new ClaudeCodeLanguageModel.Model(modelID, dependencies),
