@@ -12,7 +12,6 @@ interface Turn {
 
 export type Interface = ReturnType<typeof start>
 
-// Exactly one reader owns the SDK iterator, including while a turn is being cancelled.
 export function start(options: Options) {
   let input!: ReadableStreamDefaultController<SDKUserMessage>
   const prompt = new ReadableStream<SDKUserMessage>({ start(controller) { input = controller } })
@@ -29,58 +28,58 @@ export function start(options: Options) {
     initialized = true
   })
 
-  const pump = (async () => {
+  function finishTurn() {
+    if (!turn) return
+    turn.finished = true
+    turn.drained.resolve()
+  }
+
+  // The only reader of the SDK iterator, including while a turn is being cancelled.
+  async function readAll() {
     try {
       for await (const message of session) {
         if (turn) {
           turn.messages.push(message)
           turn.wake?.()
         }
-        if (message.type === "assistant") persisted = true
-        if (message.type === "result") {
-          persisted = true
-          if (turn) {
-            turn.finished = true
-            turn.drained.resolve()
-          }
-        }
+        if (message.type === "assistant" || message.type === "result") persisted = true
+        if (message.type === "result") finishTurn()
       }
     } catch (error) {
       failure = error
     } finally {
       ended = true
-      if (turn) {
-        turn.finished = true
-        turn.drained.resolve()
-        turn.wake?.()
-      }
+      finishTurn()
+      turn?.wake?.()
     }
-  })()
+  }
+  const pump = readAll()
 
   async function interrupt() {
     const active = turn
     if (!active || active.finished || ended) return
     await session.interrupt()
-    // The interrupt receipt precedes the result and transcript flush. Do not send another turn yet.
+    // interrupt() resolves before the result and transcript flush, so wait for the drain before another turn starts.
     await active.drained.promise
   }
 
-  async function stop() {
-    if (stopping) return stopping
-    stopping = (async () => {
-      try {
-        if (initialized && !ended) {
-          await session.interrupt()
-          if (turn && !turn.finished) await turn.drained.promise
-        }
-        input.close()
-        // An uninitialized process has no conversation to flush.
-        if (!initialized) session.close()
-        await pump
-      } finally {
-        session.close()
+  async function shutdown() {
+    try {
+      if (initialized && !ended) {
+        await session.interrupt()
+        if (turn && !turn.finished) await turn.drained.promise
       }
-    })()
+      input.close()
+      // An uninitialized process has no conversation to flush.
+      if (!initialized) session.close()
+      await pump
+    } finally {
+      session.close()
+    }
+  }
+
+  function stop() {
+    if (!stopping) stopping = shutdown()
     return stopping
   }
 
@@ -94,8 +93,8 @@ export function start(options: Options) {
   async function readStep(emit: (message: SDKMessage) => void): Promise<SDKResultMessage | "tools"> {
     const active = turn
     if (!active) throw new Error("No Claude turn to read")
-    let tools = false
-    for (;;) {
+    let calledTools = false
+    while (true) {
       const message = active.messages.shift()
       if (!message) {
         if (ended) throw failure ?? new Error("Claude Code stopped before finishing its reply")
@@ -104,9 +103,12 @@ export function start(options: Options) {
       }
       emit(message)
       if (message.type === "assistant" && message.parent_tool_use_id === null) {
-        for (const part of message.message.content) if (part.type === "tool_use") tools = true
+        for (const part of message.message.content) {
+          if (part.type === "tool_use") calledTools = true
+        }
       }
-      if (tools && message.type === "stream_event" && message.parent_tool_use_id === null && message.event.type === "message_stop") return "tools"
+      const replyEnded = message.type === "stream_event" && message.parent_tool_use_id === null && message.event.type === "message_stop"
+      if (calledTools && replyEnded) return "tools"
       if (message.type === "result") return message
     }
   }
