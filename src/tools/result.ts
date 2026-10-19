@@ -77,7 +77,7 @@ export function collect(prompt: LanguageModelV3Prompt, start: number) {
     // OpenCode puts the group's media in a following user message; attach it to the group's last result.
     for (let i = 0; i < tools.length; i++) {
       const tool = tools[i]!
-      const flags = tool.providerOptions?.["claude-code"]
+      const flags = tool.providerOptions?.["claude-agent"]
       if (flags?.toolAborted === true) aborted = true
       const isLast = i === tools.length - 1
       results.set(tool.toolCallId, convert(tool.output, isLast ? files : [], flags?.toolError === true))

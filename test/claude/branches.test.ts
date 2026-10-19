@@ -106,7 +106,7 @@ describe("Claude history branches", () => {
     expect(claude.forks[1]).toMatchObject({ source: branch.claudeSessionID, boundary: branch.history![1]!.claudeMessageID })
     expect(claude.transcripts.get(branch.claudeSessionID)).toEqual(branchMessages)
     expect(claude.runs[2]!.received.find((message) => message.type === "user").message.content).toEqual([{ type: "text", text: "Another replacement" }])
-    expect(reply.find((part) => part.type === "text-end")?.providerMetadata?.["claude-code"]?.sessionID).toBe(claude.forks[1]!.sessionID)
+    expect(reply.find((part) => part.type === "text-end")?.providerMetadata?.["claude-agent"]?.sessionID).toBe(claude.forks[1]!.sessionID)
     expect(claude.removed).toHaveLength(0)
     yield* test.registry.close()
     claude.check()

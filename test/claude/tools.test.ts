@@ -172,7 +172,7 @@ describe("Claude tool steps", () => {
     const prompt = TestTools.prompt()
     const first = yield* TestTools.step(test.model, prompt)
     TestTools.append(prompt, first, () => ({ type: "execution-denied", reason: "Cancelled by user." }),
-      { "claude-code": { toolError: true, toolAborted: true } })
+      { "claude-agent": { toolError: true, toolAborted: true } })
     prompt.push({ role: "user", content: [{ type: "text", text: "The calls were cancelled. Do not call any more tools. Reply only with CONTINUED-OTTER." }] })
     const next = yield* TestTools.step(test.model, prompt).pipe(Effect.forkChild)
     yield* Effect.promise(() => claude.started(steps[terminal]!))

@@ -5,7 +5,7 @@ import { Effect } from "effect"
 import type { LanguageModelV3Prompt } from "@ai-sdk/provider"
 import { ClaudeIO } from "../../src/claude/io.js"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
-import { ClaudeCodeLanguageModel } from "../../src/language-model/claude-code-language-model.js"
+import { ClaudeAgentLanguageModel } from "../../src/language-model/claude-agent-language-model.js"
 import { RequestKind } from "../../src/language-model/request-kind.js"
 import { it } from "../lib/effect.js"
 import { Recorder } from "../lib/recorder.js"
@@ -150,7 +150,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
     yield* Effect.addFinalizer(() => registry.close())
     const sessions = yield* registry.attach({ io: ClaudeIO.real, options: {}, storage, directory })
     const haiku = yield* TestSessions.model(sessions)
-    const sonnet = new ClaudeCodeLanguageModel.Model("sonnet", haiku.dependencies)
+    const sonnet = new ClaudeAgentLanguageModel.Model("sonnet", haiku.dependencies)
     // No session ID: the SDK runs without persisting a transcript.
     const result = yield* Effect.promise(() => sonnet.doStream({
       prompt: TestSessions.prompt("Is 8633 prime? Work it out carefully before answering, then reply in one word."),

@@ -7,7 +7,7 @@ import { ClaudeStatus } from "../claude/status.js"
 import type { ClaudeProbe } from "../claude/probe.js"
 import { SdkPlaceholder } from "../language-model/sdk-placeholder.js"
 
-export const ID = Provider.ID.make("claude-code")
+export const ID = Provider.ID.make("claude-agent")
 
 // The model list we keep between starts, so models show before the login check finishes
 const CatalogModel = Schema.Struct({
@@ -27,7 +27,7 @@ const FALLBACK: readonly CatalogModel[] = [
 ]
 
 export const Plugin = define<Scope.Scope | ClaudeStatus.Service>({
-  id: "claude-code.provider",
+  id: "claude-agent.provider",
   effect: Effect.fn("ClaudeProvider.Plugin")(function* (ctx) {
     const status = yield* ClaudeStatus.Service
     const saved = Schema.decodeUnknownOption(Catalog)(yield* ctx.storage.get(CATALOG_KEY))

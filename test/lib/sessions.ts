@@ -5,7 +5,7 @@ import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import { Effect } from "effect"
 import type { ClaudeSession } from "../../src/claude/session.js"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
-import { ClaudeCodeLanguageModel } from "../../src/language-model/claude-code-language-model.js"
+import { ClaudeAgentLanguageModel } from "../../src/language-model/claude-agent-language-model.js"
 import { RequestKind } from "../../src/language-model/request-kind.js"
 import type { SessionRecord } from "../../src/sync/record.js"
 import { FakeClaude } from "./fake-claude.js"
@@ -34,7 +34,7 @@ export function followup(text = "What was the marker? Reply only with it."): Lan
 
 export const model = Effect.fn(function* (sessions: ClaudeSessions.Interface) {
   const context = yield* Effect.context<never>()
-  return new ClaudeCodeLanguageModel.Model("haiku", {
+  return new ClaudeAgentLanguageModel.Model("haiku", {
     run: (request, signal) => Effect.runPromiseWith(context)(sessions.run(request), { signal }),
   })
 })
@@ -56,7 +56,7 @@ export async function send(session: ClaudeSession.Interface, content: SDKUserMes
   }
 }
 
-export function stream(model: ClaudeCodeLanguageModel.Model, prompt: LanguageModelV3Prompt, sessionID = "session-a", kind: RequestKind.Kind = "primary") {
+export function stream(model: ClaudeAgentLanguageModel.Model, prompt: LanguageModelV3Prompt, sessionID = "session-a", kind: RequestKind.Kind = "primary") {
   return Effect.promise(() => model.doStream({ prompt, headers: { [RequestKind.SESSION_HEADER]: sessionID, [RequestKind.HEADER]: kind } }))
 }
 
@@ -72,7 +72,7 @@ export function text(parts: readonly LanguageModelV3StreamPart[]) {
   return text
 }
 
-export const reply = Effect.fn(function* (model: ClaudeCodeLanguageModel.Model, prompt: LanguageModelV3Prompt, sessionID = "session-a", kind: RequestKind.Kind = "primary") {
+export const reply = Effect.fn(function* (model: ClaudeAgentLanguageModel.Model, prompt: LanguageModelV3Prompt, sessionID = "session-a", kind: RequestKind.Kind = "primary") {
   const result = yield* stream(model, prompt, sessionID, kind)
   return yield* Effect.tryPromise(() => collect(result.stream))
 })

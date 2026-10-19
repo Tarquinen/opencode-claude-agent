@@ -6,7 +6,7 @@ import { ClaudeSystemPrompt } from "../language-model/system-prompt.js"
 import { ClaudeProvider } from "./provider.js"
 
 export const Plugin = define<Scope.Scope>({
-  id: "claude-code.instructions",
+  id: "claude-agent.instructions",
   effect: Effect.fn("ClaudeInstructions.Plugin")(function* (ctx) {
     for (const kind of ["context", "generate", "compaction"] as const) {
       yield* ctx.session.hook(kind, (event) => Effect.gen(function* () {

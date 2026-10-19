@@ -2,7 +2,7 @@ export * as TestTools from "./tools.js"
 
 import type { LanguageModelV3FunctionTool, LanguageModelV3Prompt, LanguageModelV3StreamPart, LanguageModelV3ToolResultPart } from "@ai-sdk/provider"
 import { Effect } from "effect"
-import type { ClaudeCodeLanguageModel } from "../../src/language-model/claude-code-language-model.js"
+import type { ClaudeAgentLanguageModel } from "../../src/language-model/claude-agent-language-model.js"
 import { RequestKind } from "../../src/language-model/request-kind.js"
 import { TestSessions } from "./sessions.js"
 import type { ClaudeIO } from "../../src/claude/io.js"
@@ -54,7 +54,7 @@ export const park = Effect.fn(function* (io: ClaudeIO.Interface, directory: stri
   return { session, pending, settled: settled.promise }
 })
 
-export const step = Effect.fn(function* (model: ClaudeCodeLanguageModel.Model, prompt: LanguageModelV3Prompt, offered = tools) {
+export const step = Effect.fn(function* (model: ClaudeAgentLanguageModel.Model, prompt: LanguageModelV3Prompt, offered = tools) {
   const result = yield* Effect.promise(() => model.doStream({ prompt, tools: offered,
     headers: { [RequestKind.SESSION_HEADER]: "session-a", [RequestKind.HEADER]: "primary" },
   }))

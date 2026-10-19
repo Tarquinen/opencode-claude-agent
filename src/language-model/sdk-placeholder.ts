@@ -9,7 +9,7 @@ export const url = import.meta.url
 export function createPlaceholder() {
   return {
     languageModel: () => {
-      throw new Error("The Claude Code plugin did not supply its model. Check that the plugin is loaded.")
+      throw new Error("The Claude Agent plugin did not supply its model. Check that the plugin is loaded.")
     },
   }
 }

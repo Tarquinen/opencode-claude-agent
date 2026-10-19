@@ -137,7 +137,7 @@ describe.skipIf(!live)("tools against real Claude", () => {
     const first = yield* TestTools.step(model, prompt)
     expect(first.some((part) => part.type === "tool-call")).toBe(true)
     TestTools.append(prompt, first, () => ({ type: "execution-denied", reason: "Cancelled by user." }),
-      { "claude-code": { toolError: true, toolAborted: true } })
+      { "claude-agent": { toolError: true, toolAborted: true } })
     prompt.push({ role: "user", content: [{ type: "text", text: "The calls were cancelled. Do not call any more tools. Reply only with CONTINUED-OTTER." }] })
     const last = yield* TestTools.step(model, prompt)
     expect(TestSessions.text(last).trim()).toBe("CONTINUED-OTTER")

@@ -12,7 +12,7 @@ export const METHOD_ID = "claude-login"
 // The login method only records that the user chose Claude Code. The login itself belongs to `claude`, and the plugin
 // never sees a token (PLAN.md, "Ground rules").
 export const Plugin = define<Scope.Scope | ClaudeStatus.Service>({
-  id: "claude-code.integration",
+  id: "claude-agent.integration",
   effect: Effect.fn("ClaudeIntegration.Plugin")(function* (ctx) {
     const status = yield* ClaudeStatus.Service
 

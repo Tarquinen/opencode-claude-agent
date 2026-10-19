@@ -17,7 +17,7 @@ export type Client = OpenCode.Interface
 
 // A restart test keeps this folder in its outer scope while it opens and closes two hosts inside it.
 export const tempDirectory = Effect.acquireRelease(
-  Effect.promise(() => mkdtemp(path.join(tmpdir(), "claude-code-plugin-"))),
+  Effect.promise(() => mkdtemp(path.join(tmpdir(), "claude-agent-plugin-"))),
   (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
 )
 

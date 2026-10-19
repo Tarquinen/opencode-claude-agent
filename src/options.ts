@@ -1,4 +1,4 @@
-export * as ClaudeCodeOptions from "./options.js"
+export * as ClaudeAgentOptions from "./options.js"
 
 import { Schema } from "effect"
 

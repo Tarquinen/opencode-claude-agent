@@ -1,7 +1,7 @@
 export * as ClaudeStatus from "./status.js"
 
 import { Context, Effect, Semaphore, SubscriptionRef } from "effect"
-import type { ClaudeCodeOptions } from "../options.js"
+import type { ClaudeAgentOptions } from "../options.js"
 import { ClaudeIO } from "./io.js"
 import { ClaudeProbe } from "./probe.js"
 import { ClaudeQueryOptions } from "./query-options.js"
@@ -17,10 +17,10 @@ export interface Interface {
   readonly refresh: () => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("claude-code/ClaudeStatus") {}
+export class Service extends Context.Service<Service, Interface>()("claude-agent/ClaudeStatus") {}
 
 export const make = Effect.fn("ClaudeStatus.make")(function* (input: {
-  readonly options: ClaudeCodeOptions.Options
+  readonly options: ClaudeAgentOptions.Options
   readonly io: ClaudeIO.Interface
 }) {
   const state = yield* SubscriptionRef.make<State>({ type: "checking" })

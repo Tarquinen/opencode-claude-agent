@@ -9,7 +9,7 @@ import { ClaudeProvider } from "./provider.js"
 const isAborted = Schema.is(Schema.Struct({ error: Schema.Struct({ type: Schema.Literal("aborted") }) }))
 
 export const Plugin = define<Scope.Scope>({
-  id: "claude-code.session",
+  id: "claude-agent.session",
   effect: Effect.fn("ClaudeSessionHooks.Plugin")(function* (ctx) {
     yield* ctx.session.hook("model.request", (event) => Effect.gen(function* () {
       event.headers[RequestKind.HEADER] = event.kind

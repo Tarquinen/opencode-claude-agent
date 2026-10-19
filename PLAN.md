@@ -1,4 +1,4 @@
-# Claude Code subscription plugin for opencode: plan
+# Claude Agent plugin for opencode: plan
 
 Status: experimental. There is no plan to ship this. Anything that does ship would need written approval from Anthropic first, so we build it as if that review will happen.
 
@@ -71,7 +71,7 @@ Claude thinks and opencode acts. Claude Code's built-in tools are off, and openc
 
 ### How the plugin plugs into opencode
 
-1. **Register a "Claude Agent" provider and its models** with `ctx.provider.transform` (`packages/plugin/src/effect/provider.ts`). The stable provider ID is `claude-code`. The provider's package points at a placeholder file inside the plugin (see "Provider loading"). Models are registered right away from the last saved model list, or a built-in list on first run. The login check runs in the background and updates the list with `ctx.provider.reload()`, so opencode never waits on it at startup.
+1. **Register a "Claude Agent" provider and its models** with `ctx.provider.transform` (`packages/plugin/src/effect/provider.ts`). The stable provider ID is `claude-agent`. The provider's package points at a placeholder file inside the plugin (see "Provider loading"). Models are registered right away from the last saved model list, or a built-in list on first run. The login check runs in the background and updates the list with `ctx.provider.reload()`, so opencode never waits on it at startup.
 2. **Connect through `/connect`** in opencode's provider list. `ctx.integration.transform` adds an `external` login method, "Use existing Claude Code login (`claude auth login`)", the same way Google Vertex offers gcloud login (`packages/core/src/plugin/provider/google-vertex.ts:116-130`). opencode stores only which method was chosen, never a token (`packages/core/src/integration.ts:766-790`). There is no separate setup command. Installation and sign-in remain in the official CLI: the current public connection API has no interactive-terminal handoff, and its command-login method closes stdin and stores stdout as a key. Automatic CLI setup from `/connect` remains unresolved; this plugin does not introduce an OAuth relay or placeholder OAuth tokens.
 3. **Supply our own model** through the `aisdk` `sdk` hook (`packages/plugin/src/effect/aisdk.ts`), the way GitHub Copilot does (`packages/core/src/plugin/provider/github-copilot.ts:264-276`). We return an AI SDK `LanguageModelV3` whose `doStream` drives the Claude SDK instead of making an HTTP call. opencode converts its events into its own (`streamPartEvents` in `packages/core/src/aisdk.ts`).
 4. **Know which session a call belongs to, and what kind of call it is.** opencode sends an `x-opencode-session-id` header with every model call, including titles, compaction and generate (`packages/core/src/session/model-request.ts:279-320`), and the bridge passes headers through to `doStream` (`aisdk.ts:492-513`). Our `ctx.session.hook("model.request")`, limited to our provider, adds the call's kind (primary, compaction, title or generate) as another header, and for a native fork, the session it was forked from.
@@ -81,7 +81,7 @@ Conversation content and tools come from the final request our model receives, a
 
 ### Provider loading
 
-opencode loads a model's code through plugin `sdk` hooks, run in order. A built-in fallback that installs packages from npm runs before any plugin from config, so a made-up package name like `aisdk:opencode-claude-code` fails with an npm error before our hook runs. This is open issue [#42788](https://github.com/anomalyco/opencode/issues/42788). The full write-up and the upstream fix are in [OPENCODE-FIX.md](OPENCODE-FIX.md).
+opencode loads a model's code through plugin `sdk` hooks, run in order. A built-in fallback that installs packages from npm runs before any plugin from config, so a made-up package name like `aisdk:opencode-claude-agent` fails with an npm error before our hook runs. This is open issue [#42788](https://github.com/anomalyco/opencode/issues/42788). The full write-up and the upstream fix are in [OPENCODE-FIX.md](OPENCODE-FIX.md).
 
 Until the fix ships, the package is an absolute `file://` path to a small placeholder file in the plugin (`language-model/sdk-placeholder.ts`), worked out from `import.meta.url` when the plugin starts. The fallback imports local files directly instead of installing them, calls the file's `create...` export, and our own `sdk` hook then replaces that with the real SDK. Rules for our hook: match on our provider ID, and always replace `evt.sdk`; don't skip when it's already set.
 
@@ -117,7 +117,7 @@ In-process MCP servers have no timeout by default (`sdk.d.ts:622-660`), so a han
 - **System prompt.** Chat uses `{ type: "preset", preset: "claude_code", append: ..., snapshot: false }`, keeping Claude Code's own instructions and appending a short note that it runs in OpenCode. This follows OpenChamber and T3 Code. We do not forward opencode's assembled built-in agent prompt. The append also carries the custom agent role, tool-routing guidance when tools are offered, and the MCP instructions, skill list, Code Mode catalog and instruction files copied out of opencode's system prompt. The `context`, `generate` and `compaction` hooks obtain the role through `ctx.agent.get`; the converter retains OpenCode's rendered `Instructions from:` blocks up to its date/environment section, without reading files again. Changing the effective append restarts/resumes the process. `snapshot: false` is required because the SDK otherwise preserves the original rendered system prompt across resumes, ignoring later append changes. OpenCode's chronological instruction updates remain ordinary history input. Conversation branches retain the same preset; OpenCode supplies their task in user input. Standalone titles use OpenCode's title instructions as the SDK system prompt, with source conversation kept in the user message.
 - **Process lifetime.** One `claude` process per active opencode session. It is stopped after an idle period and resumed with `resume` when needed. Processes live in one registry for the whole opencode process, not inside a single plugin setup, so a plugin reload doesn't kill running sessions: the old setup keeps them for about 10 seconds so the new one can take them over. A session's process is replaced one at a time, so a restart waits for the previous one to finish. After compaction the old process is never reused.
 - **Stopping a process.** Always in this order: `interrupt()`, then read the remaining messages until Claude Code has finished writing its session file, then close. Closing first, or failing waiting tool handlers first, can make Claude start another model call or leave its session file on the wrong branch.
-- **Finding `claude`.** The plugin passes the user's installed binary in `pathToClaudeCodeExecutable` and doesn't install the SDK's bundled copy. On Windows it uses `claude.exe`, not the `.cmd` wrapper.
+- **Finding `claude`.** The plugin passes the user's installed binary in `pathToClaudeCodeExecutable`, so the SDK's bundled copy, which `bun install` adds as an optional dependency, is never used. On Windows it uses `claude.exe`, not the `.cmd` wrapper.
 - **Login check.** Before offering the models, check that `claude` is installed and logged in, without using any tokens. Start a session whose input never sends a message, call `initializationResult()`, read each model's context size (see "Context size"), then close it. It writes no session file and returns the Claude Code version, the account and the model list. A logged-out `claude` still starts and reports an account with no subscription. The check runs when the plugin starts and again each time the user connects the login method, because opencode keeps a problem per connection (a new connection starts with none) and the user may have just run `claude auth login`. Checks run one at a time and look up the executable each time, so connecting after installing or signing in can recover without a plugin reload.
 - **Version check.** The reported version must be at least 2.1.248, which added `verbatimPrompts`; older binaries silently ignore it. Binaries that report an older version, or omit their version, get a message to run `claude update`. This is a minimum feature check; the tested versions are listed in Background.
 - **Usage.** Each step reports the token counts of its own Claude call. Claude Code can report the same API call more than once while it streams, so the plugin keeps the largest count per API message ID instead of adding them up. Adding them up would make opencode think the context is bigger than it is and compact too early. Cost is covered by the subscription, so the models have an empty cost list and Claude's `total_cost_usd` (a list-price estimate) isn't shown.
@@ -333,7 +333,7 @@ The layout follows two opencode patterns:
 opencode loads one default plugin per package (`packages/core/src/plugin/module.ts:125-134`). `index.ts` is that plugin, and it runs a list of feature plugins, the same way `plugin/websearch/index.ts` lists its providers.
 
 ```
-opencode-claude-code/
+opencode-claude-agent/
 ├── package.json            exports "./server" → src/index.ts
 ├── server.ts               Re-exports src/index.ts, for loading from a local folder
 ├── README.md
@@ -361,13 +361,13 @@ opencode-claude-code/
 │   │   └── probe.ts        Login check, version check, model list and context sizes
 │   │
 │   ├── language-model/     The AI SDK model, laid out like opencode's github-copilot/
-│   │   ├── claude-code-language-model.ts  doStream: select chat or side-call prompt, run the request, stream back
+│   │   ├── claude-agent-language-model.ts  doStream: select chat or side-call prompt, run the request, stream back
 │   │   ├── request-kind.ts                Request kind and session headers
 │   │   ├── system-prompt.ts               Claude preset for conversations; native task prompt for titles
 │   │   ├── convert-to-claude-message.ts   opencode prompt → Claude message (text, tool history, images, PDFs)
 │   │   ├── convert-claude-stream.ts       Claude messages → opencode stream (text, thinking, tools, finish reasons)
 │   │   ├── usage.ts                       Token counts per API message, without double counting
-│   │   ├── claude-code-error.ts           Plan limits and reset times, login, billing and empty-success errors
+│   │   ├── claude-agent-error.ts           Plan limits and reset times, login, billing and empty-success errors
 │   │   └── sdk-placeholder.ts             The create...() the npm fallback loads until the opencode fix ships
 │   │
 │   ├── tools/              opencode tools offered to Claude
@@ -399,7 +399,7 @@ opencode-claude-code/
 2. **Only `claude/` loads the Claude SDK at runtime.** Every other file uses only its types. The SDK changes often, so most breakages stay in one folder. `tools/server.ts` is likewise the only runtime user of the MCP SDK.
 3. **`sync/` (except `record.ts`), the converters, `tools/names.ts` and `tools/result.ts` are plain functions.** They use no services and start no processes, so they are tested quickly with Claude messages taken from recordings and no mocks.
 4. **Each file has one job**, and its name says what it is.
-5. **Same style as opencode.** Modules start with the self-export (`export * as ClaudeProvider from "./provider.js"`). Each feature exports `Plugin = define({ id: "claude-code.provider", effect: Effect.fn("ClaudeProvider.Plugin")(...) })`, with small helpers below it. opencode's style guide applies.
+5. **Same style as opencode.** Modules start with the self-export (`export * as ClaudeProvider from "./provider.js"`). Each feature exports `Plugin = define({ id: "claude-agent.provider", effect: Effect.fn("ClaudeProvider.Plugin")(...) })`, with small helpers below it. opencode's style guide applies.
 
 ### The entry point
 
@@ -417,9 +417,9 @@ const features = [
 // Restart tests pass their own and close it, as an exiting opencode would.
 export const make = (io: ClaudeIO.Interface, registry = ClaudeSessions.registry()) =>
   define({
-    id: "claude-code",
-    effect: Effect.fn("ClaudeCode.Plugin")(function* (ctx) {
-      const options = yield* ClaudeCodeOptions.decode(ctx.options).pipe(Effect.orDie)
+    id: "claude-agent",
+    effect: Effect.fn("ClaudeAgent.Plugin")(function* (ctx) {
+      const options = yield* ClaudeAgentOptions.decode(ctx.options).pipe(Effect.orDie)
       const status = yield* ClaudeStatus.make({ options, io })
       const sessions = yield* registry.attach({ options, io, storage: ctx.storage, directory: ctx.location.directory })
       for (const feature of features) {
@@ -437,8 +437,8 @@ export default make(ClaudeIO.real)
 
 ### One step through the code
 
-1. `plugin/aisdk.ts` has given opencode a provider whose `languageModel(id)` creates our `ClaudeCodeLanguageModel.Model`.
-2. opencode calls `doStream` in `claude-code-language-model.ts`, which reads the session and kind headers.
+1. `plugin/aisdk.ts` has given opencode a provider whose `languageModel(id)` creates our `ClaudeAgentLanguageModel.Model`.
+2. opencode calls `doStream` in `claude-agent-language-model.ts`, which reads the session and kind headers.
 3. `sync/decide.ts` compares the request with the record from `sync/record.ts` and picks one of the four cases. `sync/catch-up.ts` builds a catch-up message when one is needed.
 4. `claude/sessions.ts` returns the live Claude session, starting or resuming it with the settings from `claude/query-options.ts`.
 5. `sync/catch-up.ts` or `convert-to-claude-message.ts` builds the message, or `tools/result.ts` collects the tool results Claude is waiting on and `tools/pending.ts` hands them over.

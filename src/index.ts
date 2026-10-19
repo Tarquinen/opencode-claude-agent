@@ -3,7 +3,7 @@ import { Effect, Scope } from "effect"
 import { ClaudeIO } from "./claude/io.js"
 import { ClaudeStatus } from "./claude/status.js"
 import { ClaudeSessions } from "./claude/sessions.js"
-import { ClaudeCodeOptions } from "./options.js"
+import { ClaudeAgentOptions } from "./options.js"
 import { ClaudeAISDK } from "./plugin/aisdk.js"
 import { ClaudeIntegration } from "./plugin/integration.js"
 import { ClaudeInstructions } from "./plugin/instructions.js"
@@ -20,9 +20,9 @@ const features: readonly Plugin<Scope.Scope | ClaudeStatus.Service | ClaudeSessi
 // Restart tests pass their own and close it, as an exiting opencode would.
 export const make = (io: ClaudeIO.Interface, registry = ClaudeSessions.registry()) =>
   define({
-    id: "claude-code",
-    effect: Effect.fn("ClaudeCode.Plugin")(function* (ctx) {
-      const options = yield* ClaudeCodeOptions.decode(ctx.options).pipe(Effect.orDie)
+    id: "claude-agent",
+    effect: Effect.fn("ClaudeAgent.Plugin")(function* (ctx) {
+      const options = yield* ClaudeAgentOptions.decode(ctx.options).pipe(Effect.orDie)
       const status = yield* ClaudeStatus.make({ options, io })
       const sessions = yield* registry.attach({ options, io, storage: ctx.storage, directory: ctx.location.directory })
       for (const feature of features) {

@@ -2,7 +2,7 @@ import { describe, expect } from "bun:test"
 import { Effect, Exit, Fiber, Scope } from "effect"
 import { TestClock } from "effect/testing"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
-import { ClaudeCodeLanguageModel } from "../../src/language-model/claude-code-language-model.js"
+import { ClaudeAgentLanguageModel } from "../../src/language-model/claude-agent-language-model.js"
 import { ClaudeSystemPrompt } from "../../src/language-model/system-prompt.js"
 import { RequestKind } from "../../src/language-model/request-kind.js"
 import { it } from "../lib/effect.js"
@@ -251,9 +251,9 @@ describe("Claude sessions", () => {
       { model: "sonnet", effort: "low" },
     ]
     for (const setting of settings) {
-      const model = new ClaudeCodeLanguageModel.Model(setting.model, test.model.dependencies)
+      const model = new ClaudeAgentLanguageModel.Model(setting.model, test.model.dependencies)
       const result = yield* Effect.promise(() => model.doStream({ prompt, maxOutputTokens: setting.maxOutputTokens,
-        providerOptions: { "claude-code": setting.effort ? { effort: setting.effort } : {} },
+        providerOptions: { "claude-agent": setting.effort ? { effort: setting.effort } : {} },
         headers: { [RequestKind.HEADER]: "primary", [RequestKind.SESSION_HEADER]: "session-a" } }))
       expect(TestSessions.text(yield* Effect.promise(() => TestSessions.collect(result.stream)))).toBe("CONTROL-OTTER")
       prompt.push({ role: "assistant", content: [{ type: "text", text: "CONTROL-OTTER" }] },

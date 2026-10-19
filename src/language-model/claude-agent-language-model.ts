@@ -1,4 +1,4 @@
-export * as ClaudeCodeLanguageModel from "./claude-code-language-model.js"
+export * as ClaudeAgentLanguageModel from "./claude-agent-language-model.js"
 
 import type { LanguageModelV3, LanguageModelV3CallOptions, LanguageModelV3FunctionTool, LanguageModelV3StreamResult } from "@ai-sdk/provider"
 import type { ClaudeSessions } from "../claude/sessions.js"
@@ -13,7 +13,7 @@ export interface Dependencies {
 
 export class Model implements LanguageModelV3 {
   readonly specificationVersion = "v3"
-  readonly provider = "claude-code"
+  readonly provider = "claude-agent"
   readonly supportedUrls = {}
 
   constructor(
@@ -22,7 +22,7 @@ export class Model implements LanguageModelV3 {
   ) {}
 
   async doGenerate(_options: LanguageModelV3CallOptions): Promise<never> {
-    throw new Error("Claude Code models only support streaming")
+    throw new Error("Claude Agent models only support streaming")
   }
 
   async doStream(options: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
@@ -38,7 +38,7 @@ export class Model implements LanguageModelV3 {
     const headers = new Headers(options.headers as HeadersInit)
     const kind = headers.get(RequestKind.HEADER)
     const session = headers.get(RequestKind.SESSION_HEADER) ?? undefined
-    const settings = options.providerOptions?.["claude-code"]
+    const settings = options.providerOptions?.["claude-agent"]
     const role = settings?.[ClaudeSystemPrompt.AGENT_OPTION]
     const agent = typeof role === "string" ? role : undefined
     const effort = parseEffort(settings?.effort)
@@ -100,5 +100,5 @@ function parseEffort(value: unknown): EffortLevel | undefined {
   for (const effort of EFFORTS) {
     if (value === effort) return effort
   }
-  throw new Error("Claude Code effort must be low, medium, high, xhigh or max")
+  throw new Error("Claude Agent effort must be low, medium, high, xhigh or max")
 }

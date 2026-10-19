@@ -46,7 +46,7 @@ This format is internal to Claude Code and not documented. Recordings (below) ar
 
 ## Level 1: pure logic
 
-The plain-function modules from PLAN.md's Code structure (`sync/` except `record.ts`, the converters, `tools/names.ts`, `tools/result.ts`, `language-model/usage.ts`, `claude-code-error.ts`). Inputs are opencode prompts and Claude messages. Claude messages are copied from recordings, never invented.
+The plain-function modules from PLAN.md's Code structure (`sync/` except `record.ts`, the converters, `tools/names.ts`, `tools/result.ts`, `language-model/usage.ts`, `claude-agent-error.ts`). Inputs are opencode prompts and Claude messages. Claude messages are copied from recordings, never invented.
 
 ## Level 2: fake Claude Code
 
@@ -81,13 +81,13 @@ opencode runs inside the test through `@opencode/sdk` (published on npm). `OpenC
 
 ```ts
 await using oc = await OpenCode.create({
-  plugins: [ClaudeCode.make(fakeIO), TestPlugin],
+  plugins: [ClaudeAgent.make(fakeIO), TestPlugin],
   config: { directory: configDir, project: false, content: "{}" },
   models: { fetch: false },
   fs: { filewatcher: false },
 })
 const session = await oc.session.create({ location: { directory: projectDir } })
-await oc.session.switchModel({ sessionID: session.id, model: { providerID: "claude-code", id: "sonnet" } })
+await oc.session.switchModel({ sessionID: session.id, model: { providerID: "claude-agent", id: "sonnet" } })
 await oc.session.prompt({ sessionID: session.id, text: "Use the test tool" })
 await oc.session.wait({ sessionID: session.id })
 const { messages } = await oc.session.export({ sessionID: session.id })
@@ -268,8 +268,8 @@ Config options can't hold functions, so the plugin is built by a function. `clau
 ```ts
 export const make = (io: ClaudeIO.Interface, registry = ClaudeSessions.registry()) =>
   define({
-    id: "claude-code",
-    effect: Effect.fn("ClaudeCode.Plugin")(function* (ctx) {
+    id: "claude-agent",
+    effect: Effect.fn("ClaudeAgent.Plugin")(function* (ctx) {
       // ...same as PLAN.md's entry point, with io passed to registry.attach
     }),
   })

@@ -126,7 +126,7 @@ We use the `file://` package path, which opencode already supports:
 
 ### Switching once the fix ships
 
-It's a one-line change: set the package to `"aisdk:opencode-claude-code"` and delete the placeholder file. Nothing else depends on the package name:
+It's a one-line change: set the package to `"aisdk:opencode-claude-agent"` and delete the placeholder file. Nothing else depends on the package name:
 
 - Our `sdk` hook is matched by provider ID, not package.
 - Saved provider metadata is keyed by the model's canonical ID or provider ID, not the package (`aisdk.ts:369-377`, `439-452`).

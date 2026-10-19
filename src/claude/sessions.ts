@@ -6,7 +6,7 @@ import { Context, Effect, Fiber, Semaphore } from "effect"
 import { ClaudeIO } from "./io.js"
 import { ClaudeQueryOptions } from "./query-options.js"
 import { ClaudeSession } from "./session.js"
-import type { ClaudeCodeOptions } from "../options.js"
+import type { ClaudeAgentOptions } from "../options.js"
 import { SessionRecord } from "../sync/record.js"
 import { Checkpoints } from "../sync/checkpoints.js"
 import { SyncDecision } from "../sync/decide.js"
@@ -61,7 +61,7 @@ export interface Interface {
   readonly run: (request: Request) => Effect.Effect<void, Error>
 }
 
-export class Service extends Context.Service<Service, Interface>()("claude-code/Sessions") {}
+export class Service extends Context.Service<Service, Interface>()("claude-agent/Sessions") {}
 
 const launch = (request: Request) => JSON.stringify([request.maxOutputTokens, request.system, request.tools])
 
@@ -118,7 +118,7 @@ export function registry() {
 
   const attach = Effect.fn("ClaudeSessions.attach")(function* (input: {
     readonly io: ClaudeIO.Interface
-    readonly options: ClaudeCodeOptions.Options
+    readonly options: ClaudeAgentOptions.Options
     readonly storage: SessionRecord.Storage
     readonly directory: string
   }) {

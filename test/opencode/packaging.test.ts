@@ -16,7 +16,7 @@ describe.skipIf(!opencode)("packaging", () => {
     () =>
       Effect.gen(function* () {
         const home = yield* Effect.acquireRelease(
-          Effect.promise(() => mkdtemp(path.join(tmpdir(), "claude-code-packaging-"))),
+          Effect.promise(() => mkdtemp(path.join(tmpdir(), "claude-agent-packaging-"))),
           (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
         )
         const config = path.join(home, ".config", "opencode")
@@ -50,10 +50,10 @@ describe.skipIf(!opencode)("packaging", () => {
             return output
           })
 
-        yield* run(["auth", "login", "claude-code", "--method", "claude-login"])
+        yield* run(["auth", "login", "claude-agent", "--method", "claude-login"])
         const models = yield* run(["models"])
-        expect(models).toContain("claude-code/sonnet")
-        const reply = yield* run(["run", "--model", "claude-code/haiku", "Reply with the marker."])
+        expect(models).toContain("claude-agent/sonnet")
+        const reply = yield* run(["run", "--model", "claude-agent/haiku", "Reply with the marker."])
         expect(reply).toContain("COPPER-OTTER")
         // The plugin started our fake from the `claudePath` option, not the `claude` on PATH
         const starts = yield* Effect.promise(() => readFile(log, "utf8"))

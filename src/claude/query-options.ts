@@ -2,7 +2,7 @@ export * as ClaudeQueryOptions from "./query-options.js"
 
 import type { LanguageModelV3FunctionTool } from "@ai-sdk/provider"
 import type { Options } from "@anthropic-ai/claude-agent-sdk"
-import type { ClaudeCodeOptions } from "../options.js"
+import type { ClaudeAgentOptions } from "../options.js"
 import { ToolHooks } from "../tools/hooks.js"
 import type { PendingTools } from "../tools/pending.js"
 import { ToolServer } from "../tools/server.js"
@@ -24,7 +24,7 @@ const ISOLATION_ENV = {
   CLAUDE_CODE_EFFORT_LEVEL: undefined,
 }
 
-export function executable(input: { options: ClaudeCodeOptions.Options; io: ClaudeIO.Interface }) {
+export function executable(input: { options: ClaudeAgentOptions.Options; io: ClaudeIO.Interface }) {
   return input.options.claudePath ?? input.io.which()
 }
 

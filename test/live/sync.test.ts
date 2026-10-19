@@ -37,7 +37,7 @@ describe.skipIf(!live)("history sync against real Claude", () => {
       if (error) throw error.error
       const reply = TestSessions.text(parts)
       const end = parts.find((part) => part.type === "text-end")
-      expect(end?.providerMetadata?.["claude-code"]).toMatchObject({ sessionID: expect.any(String), messageID: expect.any(String) })
+      expect(end?.providerMetadata?.["claude-agent"]).toMatchObject({ sessionID: expect.any(String), messageID: expect.any(String) })
       history.push({ role: "assistant", content: [{ type: "text", text: reply }] })
       return reply
     })

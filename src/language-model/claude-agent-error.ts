@@ -1,4 +1,4 @@
-export * as ClaudeCodeError from "./claude-code-error.js"
+export * as ClaudeAgentError from "./claude-agent-error.js"
 
 import type { SDKAssistantMessageError, SDKMessage, SDKRateLimitInfo } from "@anthropic-ai/claude-agent-sdk"
 
