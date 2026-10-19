@@ -69,24 +69,31 @@ function isToolMedia(message: LanguageModelV3Message) {
 
 export function groups(prompt: LanguageModelV3Prompt): Group[] {
   const groups: Group[] = []
-  for (let i = 0; i < prompt.length; i++) {
+  let i = 0
+  while (i < prompt.length) {
     const message = prompt[i]!
+    const start = i
+    i++
     if (message.role === "system") continue
     const parts = visible(message)
     if (parts.length === 0) continue
-    const start = i
     const members = [hash(parts)]
     if (message.role === "user") {
-      while (prompt[i + 1]?.role === "user") {
-        const next = prompt[++i]!
-        if (next.role === "user") members.push(hash(visible(next)))
+      while (i < prompt.length) {
+        const next = prompt[i]!
+        if (next.role !== "user") break
+        members.push(hash(visible(next)))
+        i++
       }
       members.sort()
-    } else if (message.role === "tool" && prompt[i + 1] && isToolMedia(prompt[i + 1]!)) {
-      const media = prompt[++i]!
-      if (media.role === "user") members.push(hash(visible(media)))
+    } else if (message.role === "tool") {
+      const next = prompt[i]
+      if (next && next.role === "user" && isToolMedia(next)) {
+        members.push(hash(visible(next)))
+        i++
+      }
     }
-    groups.push({ hash: hash({ role: message.role, members }), role: message.role, start, end: i + 1 })
+    groups.push({ hash: hash({ role: message.role, members }), role: message.role, start, end: i })
   }
   return groups
 }

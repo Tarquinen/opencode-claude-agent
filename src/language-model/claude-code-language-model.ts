@@ -1,6 +1,6 @@
 export * as ClaudeCodeLanguageModel from "./claude-code-language-model.js"
 
-import type { LanguageModelV3, LanguageModelV3CallOptions, LanguageModelV3StreamResult } from "@ai-sdk/provider"
+import type { LanguageModelV3, LanguageModelV3CallOptions, LanguageModelV3FunctionTool, LanguageModelV3StreamResult } from "@ai-sdk/provider"
 import type { ClaudeSessions } from "../claude/sessions.js"
 import type { EffortLevel } from "@anthropic-ai/claude-agent-sdk"
 import { ConvertClaudeStream } from "./convert-claude-stream.js"
@@ -28,7 +28,12 @@ export class Model implements LanguageModelV3 {
   async doStream(options: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
     const abort = new AbortController()
     const signal = options.abortSignal ? AbortSignal.any([abort.signal, options.abortSignal]) : abort.signal
-    const tools = options.toolChoice?.type === "none" ? [] : options.tools?.filter((tool) => tool.type === "function") ?? []
+    const tools: LanguageModelV3FunctionTool[] = []
+    if (options.toolChoice?.type !== "none") {
+      for (const tool of options.tools ?? []) {
+        if (tool.type === "function") tools.push(tool)
+      }
+    }
     const convert = ConvertClaudeStream.make(tools)
     const headers = new Headers(options.headers as HeadersInit)
     const kind = headers.get(RequestKind.HEADER)
@@ -36,13 +41,10 @@ export class Model implements LanguageModelV3 {
     const settings = options.providerOptions?.["claude-code"]
     const role = settings?.[ClaudeSystemPrompt.AGENT_OPTION]
     const agent = typeof role === "string" ? role : undefined
-    const effort = settings?.effort
-    if (effort !== undefined && (typeof effort !== "string" || !["low", "medium", "high", "xhigh", "max"].includes(effort))) {
-      throw new Error("Claude Code effort must be low, medium, high, xhigh or max")
-    }
+    const effort = parseEffort(settings?.effort)
     let sessionID: string | undefined
     let sourceID: string | undefined
-    let offered: typeof tools = []
+    let offered: LanguageModelV3FunctionTool[] = []
     let system: string | ReturnType<typeof ClaudeSystemPrompt.make>
     if (kind === "primary") {
       sessionID = session
@@ -54,7 +56,7 @@ export class Model implements LanguageModelV3 {
       sourceID = session
       system = ClaudeSystemPrompt.make(options.prompt, false, agent)
     } else {
-      // Titles are standalone tasks with their own system instructions.
+      // Titles are standalone tasks, so OpenCode's system prompt replaces Claude Code's.
       system = ClaudeSystemPrompt.utility(options.prompt)
     }
     let cancelled = false
@@ -67,7 +69,7 @@ export class Model implements LanguageModelV3 {
           sourceID,
           compaction: kind === "compaction",
           model: this.modelId,
-          effort: effort as EffortLevel | undefined,
+          effort,
           maxOutputTokens: options.maxOutputTokens,
           system,
           prompt: options.prompt,
@@ -89,4 +91,14 @@ export class Model implements LanguageModelV3 {
     })
     return { stream }
   }
+}
+
+const EFFORTS: readonly EffortLevel[] = ["low", "medium", "high", "xhigh", "max"]
+
+function parseEffort(value: unknown): EffortLevel | undefined {
+  if (value === undefined) return undefined
+  for (const effort of EFFORTS) {
+    if (value === effort) return effort
+  }
+  throw new Error("Claude Code effort must be low, medium, high, xhigh or max")
 }

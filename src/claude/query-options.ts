@@ -16,14 +16,14 @@ const ISOLATION_ENV = {
   CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
   ENABLE_TOOL_SEARCH: "false",
   CLAUDE_CODE_DISABLE_ADVISOR_TOOL: "1",
+  // Raised so opencode's own truncation applies instead
   MAX_MCP_OUTPUT_TOKENS: "200000",
   // Skips OAuth, so the subscription would not be used
   CLAUDE_CODE_SIMPLE: undefined,
-  // OpenCode's selected effort must win over a shell-level Claude override.
+  // A shell-level effort override would take precedence over OpenCode's live effort settings.
   CLAUDE_CODE_EFFORT_LEVEL: undefined,
 }
 
-// The configured path wins over PATH. Undefined means Claude Code is not installed.
 export function executable(input: { options: ClaudeCodeOptions.Options; io: ClaudeIO.Interface }) {
   return input.options.claudePath ?? input.io.which()
 }
@@ -46,7 +46,6 @@ export function base(input: { executable: string; io: ClaudeIO.Interface }): Opt
   }
 }
 
-// A chat or side-call process. OpenCode's tools reach Claude through our MCP server and hooks.
 export function session(input: {
   readonly executable: string
   readonly io: ClaudeIO.Interface
@@ -59,17 +58,10 @@ export function session(input: {
   readonly pending: PendingTools.Interface
   // Side calls run without saving a transcript
   readonly persist: boolean
-  // A saved Claude session to continue. Without one, the process starts a new session.
   readonly resume?: string
 }): Options {
-  const options = base(input)
-  if (input.maxOutputTokens !== undefined) {
-    options.env = { ...options.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(input.maxOutputTokens) }
-  }
-  let mcpServers: Options["mcpServers"] = {}
-  if (input.tools.length > 0) mcpServers = { opencode: ToolServer.make(input.tools, input.pending) }
-  return {
-    ...options,
+  const options: Options = {
+    ...base(input),
     cwd: input.directory,
     model: input.model,
     effort: input.effort,
@@ -77,7 +69,13 @@ export function session(input: {
     includePartialMessages: true,
     persistSession: input.persist,
     hooks: ToolHooks.make(input.pending),
-    mcpServers,
-    ...(input.resume !== undefined ? { resume: input.resume } : { sessionId: crypto.randomUUID() }),
+    mcpServers: {},
   }
+  if (input.maxOutputTokens !== undefined) {
+    options.env = { ...options.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(input.maxOutputTokens) }
+  }
+  if (input.tools.length > 0) options.mcpServers = { opencode: ToolServer.make(input.tools, input.pending) }
+  if (input.resume !== undefined) options.resume = input.resume
+  else options.sessionId = crypto.randomUUID()
+  return options
 }

@@ -31,8 +31,7 @@ export function make() {
   return {
     update,
     result(usage: Usage) {
-      // Result usage is per turn, not per message. It can fill in a single call's final counts,
-      // but must not be added to the assistant/stream usage we already saw.
+      // Result usage sums the whole turn; only apply it when there was a single model call.
       if (messages.size <= 1) update(last ?? "result", usage)
     },
     snapshot(): LanguageModelV3Usage {
@@ -42,10 +41,11 @@ export function make() {
         output += counts.output
         reasoning += counts.reasoning
       }
-      const counts = last === undefined ? undefined : messages.get(last)
+      // Context occupancy is the last API call's input, not the sum of repeated contexts.
+      const lastCall = last === undefined ? undefined : messages.get(last)
+      const inputTotal = lastCall ? lastCall.input + lastCall.read + lastCall.write : undefined
       return {
-        // Context occupancy is the last API call's input, not the sum of repeated contexts.
-        inputTokens: { total: counts ? counts.input + counts.read + counts.write : undefined, noCache: counts?.input, cacheRead: counts?.read, cacheWrite: counts?.write },
+        inputTokens: { total: inputTotal, noCache: lastCall?.input, cacheRead: lastCall?.read, cacheWrite: lastCall?.write },
         outputTokens: { total: output, reasoning, text: output - reasoning },
       }
     },

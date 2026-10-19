@@ -17,21 +17,25 @@ export function build(input: {
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i]!
     const previous = input.previous?.history?.[i]
-    let claudeMessageID = previous?.hash === group.hash ? previous.claudeMessageID : undefined
+    let claudeMessageID: string | undefined
+    if (previous && previous.hash === group.hash) claudeMessageID = previous.claudeMessageID
     if (group.role === "tool") {
       for (const message of input.prompt.slice(group.start, group.end)) {
         if (message.role !== "tool") continue
         for (const part of message.content) {
-          if (part.type === "tool-result" && input.toolMessages.has(part.toolCallId)) claudeMessageID = input.toolMessages.get(part.toolCallId)
+          if (part.type !== "tool-result") continue
+          const toolMessage = input.toolMessages.get(part.toolCallId)
+          if (toolMessage !== undefined) claudeMessageID = toolMessage
         }
       }
     }
-    if (i === groups.length - 1 && input.userID) claudeMessageID = input.userID
+    const isLast = i === groups.length - 1
+    if (isLast && input.userID) claudeMessageID = input.userID
     history.push({ hash: group.hash, claudeMessageID })
   }
-  if (input.reply.length > 0) history.push({
-    hash: Fingerprint.groups([{ role: "assistant", content: input.reply }])[0]!.hash,
-    claudeMessageID: input.messageID,
-  })
+  if (input.reply.length > 0) {
+    const replyGroup = Fingerprint.groups([{ role: "assistant", content: input.reply }])[0]!
+    history.push({ hash: replyGroup.hash, claudeMessageID: input.messageID })
+  }
   return history
 }

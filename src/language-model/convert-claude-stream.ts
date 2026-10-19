@@ -31,19 +31,26 @@ export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
           break
         case "content_block_start": {
           const block = event.content_block
-          const kind = block.type === "text" ? "text" : block.type === "thinking" ? "reasoning" : undefined
-          if (!kind) break
-          blocks.set(event.index, kind)
           const id = `${messageID}:${event.index}`
-          parts.push({ type: `${kind}-start`, id })
-          const text = block.type === "text" ? block.text : block.type === "thinking" ? block.thinking : ""
-          if (text) parts.push({ type: `${kind}-delta`, id, delta: text })
+          if (block.type === "text") {
+            blocks.set(event.index, "text")
+            parts.push({ type: "text-start", id })
+            if (block.text) parts.push({ type: "text-delta", id, delta: block.text })
+          } else if (block.type === "thinking") {
+            blocks.set(event.index, "reasoning")
+            parts.push({ type: "reasoning-start", id })
+            if (block.thinking) parts.push({ type: "reasoning-delta", id, delta: block.thinking })
+          }
           break
         }
         case "content_block_delta": {
           const id = `${messageID}:${event.index}`
-          if (event.delta.type === "text_delta") parts.push({ type: "text-delta", id, delta: event.delta.text })
-          if (event.delta.type === "thinking_delta" && event.delta.thinking) parts.push({ type: "reasoning-delta", id, delta: event.delta.thinking })
+          const delta = event.delta
+          if (delta.type === "text_delta") {
+            parts.push({ type: "text-delta", id, delta: delta.text })
+          } else if (delta.type === "thinking_delta" && delta.thinking) {
+            parts.push({ type: "reasoning-delta", id, delta: delta.thinking })
+          }
           break
         }
         case "content_block_stop": {
@@ -56,29 +63,44 @@ export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
           usage.update(messageID, event.usage)
           break
         case "message_stop":
-          // The same boundary where ClaudeSession.readStep returns "tools". Both must agree, or a step ends without a finish.
-          if (calledTools) parts.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage: usage.snapshot() })
+          // Must match ClaudeSession.readStep's tool boundary, or OpenCode's step ends without a finish event.
+          if (calledTools) {
+            parts.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage: usage.snapshot() })
+          }
           break
       }
     }
     if (message.type === "assistant" && message.parent_tool_use_id === null) {
       // Synthetic API errors are diagnostics, not assistant answers.
       if (message.error) return parts
-      // The complete block carries the transcript UUID, unlike the API message ID on stream events.
+      // Stream events carry API message IDs; only the complete assistant message carries the transcript UUID.
       metadata = { "claude-code": { sessionID: message.session_id, messageID: message.uuid } }
       usage.update(message.message.id, message.message.usage)
       for (const block of message.message.content) {
         if (block.type !== "tool_use") continue
         calledTools = true
-        parts.push({ type: "tool-call", toolCallId: block.id, toolName: ToolNames.original(block.name, tools), input: JSON.stringify(block.input), providerMetadata: metadata })
+        parts.push({
+          type: "tool-call",
+          toolCallId: block.id,
+          toolName: ToolNames.original(block.name, tools),
+          input: JSON.stringify(block.input),
+          providerMetadata: metadata,
+        })
       }
-      // Complete assistant blocks repeat the streamed content. Only use them when no stream was sent.
+      // Complete assistant messages repeat the streamed content. Only use them when nothing was streamed.
       if (!streamed.has(message.message.id)) {
         for (let i = 0; i < message.message.content.length; i++) {
           const block = message.message.content[i]!
           const id = `${message.uuid}:${i}`
-          if (block.type === "text") parts.push({ type: "text-start", id }, { type: "text-delta", id, delta: block.text }, { type: "text-end", id, providerMetadata: metadata })
-          if (block.type === "thinking") parts.push({ type: "reasoning-start", id }, { type: "reasoning-delta", id, delta: block.thinking }, { type: "reasoning-end", id })
+          if (block.type === "text") {
+            parts.push({ type: "text-start", id })
+            parts.push({ type: "text-delta", id, delta: block.text })
+            parts.push({ type: "text-end", id, providerMetadata: metadata })
+          } else if (block.type === "thinking") {
+            parts.push({ type: "reasoning-start", id })
+            parts.push({ type: "reasoning-delta", id, delta: block.thinking })
+            parts.push({ type: "reasoning-end", id })
+          }
         }
       }
     }

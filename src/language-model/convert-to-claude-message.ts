@@ -11,11 +11,16 @@ export function content(prompt: LanguageModelV3Prompt): ContentBlockParam[] {
     if (message.role === "system") continue
     if (history) blocks.push({ type: "text", text: `<${message.role}>` })
     for (const part of message.content) {
-      if (part.type === "text") blocks.push({ type: "text", text: part.text })
-      else if (part.type === "file") blocks.push(file(part))
-      else if (part.type === "tool-call") blocks.push({ type: "text", text: `<tool-call>\n${JSON.stringify({ id: part.toolCallId, name: part.toolName, input: part.input })}\n</tool-call>` })
-      else if (part.type === "tool-result") {
-        blocks.push({ type: "text", text: `<tool-result>\n${JSON.stringify({ id: part.toolCallId, name: part.toolName, output: part.output })}\n</tool-result>` })
+      if (part.type === "text") {
+        blocks.push({ type: "text", text: part.text })
+      } else if (part.type === "file") {
+        blocks.push(file(part))
+      } else if (part.type === "tool-call") {
+        const call = JSON.stringify({ id: part.toolCallId, name: part.toolName, input: part.input })
+        blocks.push({ type: "text", text: `<tool-call>\n${call}\n</tool-call>` })
+      } else if (part.type === "tool-result") {
+        const result = JSON.stringify({ id: part.toolCallId, name: part.toolName, output: part.output })
+        blocks.push({ type: "text", text: `<tool-result>\n${result}\n</tool-result>` })
       }
     }
     if (history) blocks.push({ type: "text", text: `</${message.role}>` })
@@ -24,14 +29,19 @@ export function content(prompt: LanguageModelV3Prompt): ContentBlockParam[] {
 }
 
 function file(part: LanguageModelV3FilePart): ContentBlockParam {
-  const source = part.data instanceof URL
-    ? { type: "url" as const, url: part.data.href }
-    : { type: "base64" as const, data: typeof part.data === "string" ? part.data : Buffer.from(part.data).toString("base64") }
-  if (part.mediaType === "application/pdf") {
-    return { type: "document", source: source.type === "url" ? source : { ...source, media_type: "application/pdf" } }
+  const type = part.mediaType
+  if (type === "application/pdf") {
+    if (part.data instanceof URL) return { type: "document", source: { type: "url", url: part.data.href } }
+    return { type: "document", source: { type: "base64", media_type: type, data: base64(part.data) } }
   }
-  if (part.mediaType === "image/png" || part.mediaType === "image/jpeg" || part.mediaType === "image/gif" || part.mediaType === "image/webp") {
-    return { type: "image", source: source.type === "url" ? source : { ...source, media_type: part.mediaType } }
+  if (type === "image/png" || type === "image/jpeg" || type === "image/gif" || type === "image/webp") {
+    if (part.data instanceof URL) return { type: "image", source: { type: "url", url: part.data.href } }
+    return { type: "image", source: { type: "base64", media_type: type, data: base64(part.data) } }
   }
-  throw new Error(`Claude Code does not support ${part.mediaType} attachments`)
+  throw new Error(`Claude Code does not support ${type} attachments`)
+}
+
+function base64(data: string | Uint8Array) {
+  if (typeof data === "string") return data
+  return Buffer.from(data).toString("base64")
 }

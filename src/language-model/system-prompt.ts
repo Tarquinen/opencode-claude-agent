@@ -20,6 +20,9 @@ Use execute for Code Mode tools exactly as the catalog below specifies. Names in
 Use the skill tool to load a relevant skill before following its workflow. Tool and catalog updates in the conversation supersede earlier definitions.
 </opencode_tools>`
 
+const MCP_INSTRUCTIONS = /<mcp_instructions>[\s\S]*?<\/mcp_instructions>/g
+const SKILLS = /Skills provide specialized instructions[\s\S]*?<\/available_skills>/g
+
 export function make(prompt: LanguageModelV3Prompt, hasTools: boolean, role?: string) {
   const blocks = [primary.append]
   if (role) blocks.push("# Agent role (from OpenCode)\n" + role)
@@ -27,30 +30,36 @@ export function make(prompt: LanguageModelV3Prompt, hasTools: boolean, role?: st
   for (const message of prompt) {
     if (message.role !== "system") continue
     const text = message.content
-    for (const pattern of [/<mcp_instructions>[\s\S]*?<\/mcp_instructions>/g,
-      /Skills provide specialized instructions[\s\S]*?<\/available_skills>/g]) {
-      for (const match of text.matchAll(pattern)) blocks.push(match[0])
-    }
-    // OpenCode joins catalog entries with newlines and instruction sources with blank lines.
-    // Descriptions and TypeScript signatures can span several lines within the catalog.
-    const start = text.indexOf("# Code Mode\n")
-    const catalog = start < 0 ? -1 : text.indexOf("## Available tools", start)
-    if (catalog >= 0) {
-      const end = text.indexOf("\n\n", catalog + "## Available tools\n\n".length)
-      blocks.push(text.slice(start, end < 0 ? undefined : end).trim())
-    }
-    // OpenCode renders discovered/configured instruction files together, immediately
-    // before its date/environment block. Preserve their full text, including blank lines.
-    const instructions = text.search(/^Instructions from: /m)
-    if (instructions >= 0) {
-      const end = text.indexOf("\n\nToday's date:", instructions)
-      blocks.push("# Project instructions (loaded by OpenCode)\n" + text.slice(instructions, end < 0 ? undefined : end).trim())
-    }
+    for (const match of text.matchAll(MCP_INSTRUCTIONS)) blocks.push(match[0])
+    for (const match of text.matchAll(SKILLS)) blocks.push(match[0])
+    const catalog = codeModeCatalog(text)
+    if (catalog) blocks.push(catalog)
+    const instructions = projectInstructions(text)
+    if (instructions) blocks.push("# Project instructions (loaded by OpenCode)\n" + instructions)
   }
   return { ...primary, append: blocks.join("\n\n") }
 }
 
-// OpenCode owns side-call tasks and model selection. Keep its instructions in the system role.
+function codeModeCatalog(text: string) {
+  const start = text.indexOf("# Code Mode\n")
+  if (start < 0) return
+  const heading = text.indexOf("## Available tools", start)
+  if (heading < 0) return
+  // Catalog signatures span lines; OpenCode separates the next instruction source with a blank line.
+  const end = text.indexOf("\n\n", heading + "## Available tools\n\n".length)
+  if (end < 0) return text.slice(start).trim()
+  return text.slice(start, end).trim()
+}
+
+function projectInstructions(text: string) {
+  const start = text.search(/^Instructions from: /m)
+  if (start < 0) return
+  // Instruction files can contain blank lines; OpenCode places its date/environment block after all of them.
+  const end = text.indexOf("\n\nToday's date:", start)
+  if (end < 0) return text.slice(start).trim()
+  return text.slice(start, end).trim()
+}
+
 export function utility(prompt: LanguageModelV3Prompt) {
   const blocks: string[] = []
   for (const message of prompt) {

@@ -20,18 +20,22 @@ export const Plugin = define<Scope.Scope>({
     }), { providerID: ClaudeProvider.ID })
     yield* ctx.session.hook("context", (event) => Effect.sync(() => {
       // Let Claude choose its normal output budget. Later hooks can still set an explicit maxTokens.
-      // Compaction keeps OpenCode's summary budget; titles and generate already omit the automatic limit.
+      // Compaction has its own hook, so it keeps OpenCode's summary budget.
       delete event.options.maxTokens
-      // OpenCode's AI SDK bridge lowers error results to plain text. Preserve their status before that conversion.
+      // Preserve tool error status before the AI SDK bridge flattens error results to plain text.
       for (let i = 0; i < event.messages.length; i++) {
         const message = event.messages[i]!
         const content = [...message.content]
         for (let j = 0; j < content.length; j++) {
           const part = content[j]!
           if (part.type !== "tool-result" || part.result.type !== "error") continue
-          content[j] = { ...part, providerMetadata: { ...part.providerMetadata, [ClaudeProvider.ID]: {
-            ...part.providerMetadata?.[ClaudeProvider.ID], toolError: true, toolAborted: isAborted(part.result.value),
-          } } }
+          const flags = {
+            ...part.providerMetadata?.[ClaudeProvider.ID],
+            toolError: true,
+            toolAborted: isAborted(part.result.value),
+          }
+          const providerMetadata = { ...part.providerMetadata, [ClaudeProvider.ID]: flags }
+          content[j] = { ...part, providerMetadata }
         }
         event.messages[i] = { ...message, content }
       }
