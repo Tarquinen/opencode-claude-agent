@@ -1,6 +1,11 @@
 export * as ClaudeQueryOptions from "./query-options.js"
 
+import type { LanguageModelV3FunctionTool } from "@ai-sdk/provider"
 import type { Options } from "@anthropic-ai/claude-agent-sdk"
+import type { ClaudeCodeOptions } from "../options.js"
+import { ToolHooks } from "../tools/hooks.js"
+import type { PendingTools } from "../tools/pending.js"
+import { ToolServer } from "../tools/server.js"
 import type { ClaudeIO } from "./io.js"
 
 // Claude Code features that duplicate opencode's. opencode's version wins (PLAN.md, "Claude Code features to turn off").
@@ -18,6 +23,11 @@ const ISOLATION_ENV = {
   CLAUDE_CODE_EFFORT_LEVEL: undefined,
 }
 
+// The configured path wins over PATH. Undefined means Claude Code is not installed.
+export function executable(input: { options: ClaudeCodeOptions.Options; io: ClaudeIO.Interface }) {
+  return input.options.claudePath ?? input.io.which()
+}
+
 export function base(input: { executable: string; io: ClaudeIO.Interface }): Options {
   return {
     pathToClaudeCodeExecutable: input.executable,
@@ -33,5 +43,41 @@ export function base(input: { executable: string; io: ClaudeIO.Interface }): Opt
     permissionMode: "dontAsk",
     allowedTools: ["mcp__opencode__*"],
     verbatimPrompts: true,
+  }
+}
+
+// A chat or side-call process. OpenCode's tools reach Claude through our MCP server and hooks.
+export function session(input: {
+  readonly executable: string
+  readonly io: ClaudeIO.Interface
+  readonly directory: string
+  readonly model: string
+  readonly effort?: Options["effort"]
+  readonly maxOutputTokens?: number
+  readonly system: NonNullable<Options["systemPrompt"]>
+  readonly tools: readonly LanguageModelV3FunctionTool[]
+  readonly pending: PendingTools.Interface
+  // Side calls run without saving a transcript
+  readonly persist: boolean
+  // A saved Claude session to continue. Without one, the process starts a new session.
+  readonly resume?: string
+}): Options {
+  const options = base(input)
+  if (input.maxOutputTokens !== undefined) {
+    options.env = { ...options.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(input.maxOutputTokens) }
+  }
+  let mcpServers: Options["mcpServers"] = {}
+  if (input.tools.length > 0) mcpServers = { opencode: ToolServer.make(input.tools, input.pending) }
+  return {
+    ...options,
+    cwd: input.directory,
+    model: input.model,
+    effort: input.effort,
+    systemPrompt: input.system,
+    includePartialMessages: true,
+    persistSession: input.persist,
+    hooks: ToolHooks.make(input.pending),
+    mcpServers,
+    ...(input.resume !== undefined ? { resume: input.resume } : { sessionId: crypto.randomUUID() }),
   }
 }

@@ -115,6 +115,29 @@ describe("Claude tool steps", () => {
     claude.check()
   }))
 
+  it.effect("results that do not answer every waiting call stop the turn and rebuild from the full history", () => Effect.gen(function* () {
+    const claude = FakeClaude.make(FakeClaude.replay("tools-cancel"))
+    const test = yield* TestSessions.start(claude)
+    const prompt = TestTools.prompt()
+    TestTools.append(prompt, yield* TestTools.step(test.model, prompt), TestTools.output)
+    const results = prompt.at(-1)!
+    if (results.role !== "tool") throw new Error("Expected tool results")
+    // Drop the second lookup's result, so one waiting call has no answer.
+    results.content.pop()
+    prompt.push({ role: "user", content: [{ type: "text", text: "Do not call any tools. Reply only with CANCELLED-OTTER." }] })
+    expect(TestSessions.text(yield* TestTools.step(test.model, prompt))).toContain("CANCELLED-OTTER")
+    expect(claude.runs).toHaveLength(2)
+    expect(claude.runs[0]!.received.filter((message) => message.request?.subtype === "interrupt")).toHaveLength(1)
+    const rebuilt = claude.runs[1]!
+    expect(rebuilt.args.some((arg) => arg.startsWith("--resume="))).toBe(false)
+    const user = JSON.stringify(rebuilt.received.find((message) => message.type === "user").message.content)
+    expect(user).toContain("<conversation-checkpoint>")
+    expect(user).toContain("LILAC-HERON")
+    expect(user).not.toContain("LEMON-IBIS")
+    yield* test.registry.close()
+    claude.check()
+  }))
+
   it.effect("active-turn steering delivers tool feedback and new input through the SDK queue", () => Effect.gen(function* () {
     const claude = FakeClaude.make(FakeClaude.replay("tools-continue"))
     const test = yield* TestSessions.start(claude)

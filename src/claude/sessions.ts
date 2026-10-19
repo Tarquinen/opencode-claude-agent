@@ -13,8 +13,6 @@ import { SyncDecision } from "../sync/decide.js"
 import { CatchUp } from "../sync/catch-up.js"
 import { ConvertToClaudeMessage } from "../language-model/convert-to-claude-message.js"
 import { PendingTools } from "../tools/pending.js"
-import { ToolServer } from "../tools/server.js"
-import { ToolHooks } from "../tools/hooks.js"
 import { ToolNames } from "../tools/names.js"
 import { ToolResult } from "../tools/result.js"
 
@@ -36,18 +34,23 @@ interface Request {
   readonly emit: (message: SDKMessage) => void
 }
 
-interface Entry {
-  readonly lock: Semaphore.Semaphore
-  process?: ClaudeSession.Interface
-  record?: SessionRecord.Record
-  model?: string
+// These values belong to one process and are replaced together when it restarts.
+interface LiveProcess {
+  readonly session: ClaudeSession.Interface
+  readonly pending: PendingTools.Interface
+  model: string
   effort?: Options["effort"]
   // Settings that need a new process to change. Model and effort change on the running one.
-  launch?: string
+  readonly launch: string
+  waiting?: string[]
+}
+
+interface Entry {
+  readonly lock: Semaphore.Semaphore
+  process?: LiveProcess
+  record?: SessionRecord.Record
   idle?: Fiber.Fiber<void, never>
   active?: Fiber.Fiber<unknown, unknown>
-  pending?: PendingTools.Interface
-  waiting?: string[]
 }
 
 export interface Interface {
@@ -60,6 +63,7 @@ const launch = (request: Request) => JSON.stringify([request.maxOutputTokens, re
 
 const toError = (error: unknown) => error instanceof Error ? error : new Error(String(error))
 const attempt = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: toError })
+const attemptSync = <A>(run: () => A) => Effect.try({ try: run, catch: toError })
 
 export type Registry = ReturnType<typeof registry>
 
@@ -73,19 +77,17 @@ export function registry() {
   const interrupt = Effect.fn("ClaudeSessions.interrupt")(function* (entry: Entry) {
     const process = entry.process
     if (!process) return
-    yield* attempt(() => process.interrupt())
-    entry.pending?.clear()
-    entry.waiting = undefined
+    yield* attempt(() => process.session.interrupt())
+    process.pending.clear()
+    process.waiting = undefined
   }, Effect.uninterruptible)
 
   const stop = Effect.fn("ClaudeSessions.stop")(function* (entry: Entry) {
-    if (!entry.process) return
     const process = entry.process
-    yield* attempt(() => process.stop()).pipe(Effect.ensuring(Effect.sync(() => {
-      entry.pending?.clear()
+    if (!process) return
+    yield* attempt(() => process.session.stop()).pipe(Effect.ensuring(Effect.sync(() => {
+      process.pending.clear()
       entry.process = undefined
-      entry.pending = undefined
-      entry.waiting = undefined
     })))
   }, Effect.uninterruptible)
 
@@ -99,11 +101,14 @@ export function registry() {
     entries.clear()
   })
 
+  const cancelHandover = Effect.fn("ClaudeSessions.cancelHandover")(function* () {
+    if (!handover) return
+    yield* Fiber.interrupt(handover)
+    handover = undefined
+  })
+
   const close = Effect.fn("ClaudeSessions.close")(function* () {
-    if (handover) {
-      yield* Fiber.interrupt(handover)
-      handover = undefined
-    }
+    yield* cancelHandover()
     yield* closeEntries()
   })
 
@@ -115,10 +120,7 @@ export function registry() {
   }) {
     const records = SessionRecord.make(input.storage)
     owners++
-    if (handover) {
-      yield* Fiber.interrupt(handover)
-      handover = undefined
-    }
+    yield* cancelHandover()
     yield* Effect.addFinalizer(() => Effect.gen(function* () {
       owners--
       if (owners !== 0 || (entries.size === 0 && temporary.size === 0)) return
@@ -127,53 +129,49 @@ export function registry() {
 
     const open = Effect.fn("ClaudeSessions.open")(function* (entry: Entry, request: Request) {
       if (!entry.process) {
-        const executable = input.options.claudePath ?? input.io.which()
+        const executable = ClaudeQueryOptions.executable(input)
         if (!executable) return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
-        entry.model = request.model
-        entry.effort = request.effort
-        entry.launch = launch(request)
         const pending = PendingTools.make()
-        entry.pending = pending
-        const options = ClaudeQueryOptions.base({ executable, io: input.io })
-        if (request.maxOutputTokens !== undefined) options.env = { ...options.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(request.maxOutputTokens) }
-        entry.process = yield* Effect.try(() => ClaudeSession.start({
-          ...options,
-          cwd: input.directory,
+        const session = yield* attemptSync(() => ClaudeSession.start(ClaudeQueryOptions.session({
+          executable,
+          io: input.io,
+          directory: input.directory,
           model: request.model,
           effort: request.effort,
-          systemPrompt: request.system,
-          includePartialMessages: true,
-          persistSession: request.sessionID !== undefined,
-          hooks: ToolHooks.make(pending),
-          mcpServers: request.tools.length ? { opencode: ToolServer.make(request.tools, pending) } : {},
-          ...(entry.record ? { resume: entry.record.claudeSessionID } : { sessionId: crypto.randomUUID() }),
-        }))
+          maxOutputTokens: request.maxOutputTokens,
+          system: request.system,
+          tools: request.tools,
+          pending,
+          persist: request.sessionID !== undefined,
+          resume: entry.record?.claudeSessionID,
+        })))
+        entry.process = { session, pending, model: request.model, effort: request.effort, launch: launch(request) }
       }
       const process = entry.process
-      yield* attempt(() => process.ready).pipe(
+      yield* attempt(() => process.session.ready).pipe(
         Effect.timeout("30 seconds"),
         Effect.mapError((error) => new Error(String(error))),
         Effect.onError(() => stop(entry).pipe(Effect.ignore)),
       )
       // Apply controls before sending input or releasing parked tool results.
-      if (entry.model !== request.model) {
-        yield* attempt(() => process.setModel(request.model))
-        entry.model = request.model
+      if (process.model !== request.model) {
+        yield* attempt(() => process.session.setModel(request.model))
+        process.model = request.model
       }
-      if (entry.effort !== request.effort) {
-        yield* attempt(() => process.setEffort(request.effort))
-        entry.effort = request.effort
+      if (process.effort !== request.effort) {
+        yield* attempt(() => process.session.setEffort(request.effort))
+        process.effort = request.effort
       }
       return process
     })
 
     const turn = Effect.fn("ClaudeSessions.turn")(function* (entry: Entry, request: Request, start: number, results?: ReturnType<typeof ToolResult.collect>) {
-      const content = yield* Effect.try({
-        try: () => request.sessionID || entry.record ? CatchUp.content(request.prompt, results?.end ?? start) : ConvertToClaudeMessage.content(request.prompt),
-        catch: toError,
-      })
+      const content = yield* attemptSync(() => request.sessionID || entry.record
+        ? CatchUp.content(request.prompt, results?.end ?? start)
+        : ConvertToClaudeMessage.content(request.prompt))
       // A rejected rebuild must not leave an empty process paired with the old durable record.
-      const process = yield* open(entry, request)
+      const live = yield* open(entry, request)
+      const process = live.session
       const userID = !results || content.length ? crypto.randomUUID() : undefined
       const reply: Array<LanguageModelV3TextPart | LanguageModelV3ToolCallPart> = []
       const toolMessages = new Map<string, string>()
@@ -194,7 +192,7 @@ export function registry() {
             if (part.type === "text") reply.push({ type: "text", text: part.text })
             if (part.type === "tool_use") {
               const name = ToolNames.original(part.name, request.tools)
-              entry.pending!.expect(part.id, part.name)
+              live.pending.expect(part.id, part.name)
               waiting.push(part.id)
               reply.push({ type: "tool-call", toolCallId: part.id, toolName: name, input: part.input })
             }
@@ -208,11 +206,11 @@ export function registry() {
       yield* Effect.gen(function* () {
         if (results) {
           if (content.length) process.addUser(content, userID!)
-          for (const id of entry.waiting!) entry.pending!.resolve(id, results.results.get(id)!)
+          for (const id of live.waiting!) live.pending.resolve(id, results.results.get(id)!)
         } else process.begin(content, userID)
         parked = (yield* attempt(() => process.readStep(emit))) === "tools"
         completed = true
-        entry.waiting = parked ? waiting : undefined
+        live.waiting = parked ? waiting : undefined
       }).pipe(
         // A tool boundary releases only the OpenCode step. Actual cancellation still interrupts and drains the turn.
         Effect.ensuring(Effect.gen(function* () {
@@ -248,7 +246,7 @@ export function registry() {
       const boundary = SyncDecision.boundary(request.prompt, source)
       if (!source || !boundary) return 0
       // Reject unsupported input before creating a new transcript.
-      yield* Effect.try(() => CatchUp.content(request.prompt, boundary.start))
+      yield* attemptSync(() => CatchUp.content(request.prompt, boundary.start))
       const fork = yield* attempt(() => input.io.fork(source.claudeSessionID, boundary.messageID))
       if (!fork) return 0
       entry.record = {
@@ -273,6 +271,45 @@ export function registry() {
       return yield* (source ? source.lock.withPermit(copy) : copy)
     })
 
+    // Decides where in the prompt this request starts, and whether it delivers results to a parked tool step.
+    const prepare = Effect.fn("ClaudeSessions.prepare")(function* (entry: Entry, request: Request) {
+      // Retire an exited or incompatible process before choosing how to deliver tool results.
+      // open() must not replace a process after we have chosen to continue its parked turn.
+      const process = entry.process
+      if (process && (process.session.ended || process.launch !== launch(request))) yield* stop(entry)
+      if (!request.sessionID) return { start: yield* snapshot(entry, request), results: undefined }
+      entry.record ??= yield* records.get(request.sessionID)
+      const decision = SyncDecision.decide(request.prompt, entry.record)
+      let start = decision.start
+      if (decision.kind === "fresh" || decision.kind === "changed") {
+        yield* stop(entry)
+        const previous = entry.record
+        entry.record = undefined
+        if (decision.kind === "changed") start = yield* branch(entry, request, previous)
+        else if (!previous) start = yield* snapshot(entry, request)
+      } else if (!entry.process && entry.record
+        && !(yield* attempt(() => input.io.sessionExists(entry.record!.claudeSessionID)))) {
+        entry.record = undefined
+        start = 0
+      }
+      const live = entry.process
+      if (!live?.session.running || !live.waiting) return { start, results: undefined }
+      const results = yield* attemptSync(() => ToolResult.collect(request.prompt, start))
+      const found = results.results
+      if (!live.waiting.every((id) => found.has(id))) {
+        yield* stop(entry)
+        entry.record = undefined
+        return { start: 0, results: undefined }
+      }
+      if (results.aborted) {
+        // OpenCode ended this turn. Start a fresh user turn with the saved results as catch-up;
+        // queueing input with addUser only steers a turn that is still running.
+        yield* interrupt(entry)
+        return { start, results: undefined }
+      }
+      return { start, results }
+    })
+
     const run = Effect.fn("ClaudeSessions.run")(function* (request: Request) {
       let entry = request.sessionID ? entries.get(request.sessionID) : undefined
       if (!entry) {
@@ -287,42 +324,7 @@ export function registry() {
           current.idle = undefined
         }
         current.active = yield* Effect.withFiber(Effect.succeed)
-        // Retire an exited or incompatible process before choosing how to deliver tool results.
-        // open() must not replace a process after we have chosen to continue its parked turn.
-        if (current.process?.ended || current.launch !== launch(request)) yield* stop(current)
-        let start = 0
-        let results: ReturnType<typeof ToolResult.collect> | undefined
-        if (request.sessionID) {
-          current.record ??= yield* records.get(request.sessionID)
-          const decision = SyncDecision.decide(request.prompt, current.record)
-          start = decision.start
-          if (decision.kind === "fresh" || decision.kind === "changed") {
-            yield* stop(current)
-            const previous = current.record
-            current.record = undefined
-            if (decision.kind === "changed") start = yield* branch(current, request, previous)
-            else if (!previous) start = yield* snapshot(current, request)
-          } else if (!current.process && current.record
-            && !(yield* attempt(() => input.io.sessionExists(current.record!.claudeSessionID)))) {
-            current.record = undefined
-            start = 0
-          }
-          if (current.process?.running && current.waiting) {
-            results = yield* Effect.try(() => ToolResult.collect(request.prompt, start))
-            const found = results.results
-            if (!current.waiting.every((id) => found.has(id))) {
-              yield* stop(current)
-              current.record = undefined
-              results = undefined
-              start = 0
-            } else if (results.aborted) {
-              // OpenCode ended this turn. Start a fresh user turn with the saved results as catch-up;
-              // queueing input with addUser only steers a turn that is still running.
-              yield* interrupt(current)
-              results = undefined
-            }
-          }
-        } else start = yield* snapshot(current, request)
+        const { start, results } = yield* prepare(current, request)
         yield* turn(current, request, start, results)
       }).pipe(Effect.ensuring(release(current, request))))
     })

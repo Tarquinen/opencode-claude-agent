@@ -56,6 +56,7 @@ export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
           usage.update(messageID, event.usage)
           break
         case "message_stop":
+          // The same boundary where ClaudeSession.readStep returns "tools". Both must agree, or a step ends without a finish.
           if (calledTools) parts.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage: usage.snapshot() })
           break
       }

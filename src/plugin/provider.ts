@@ -31,7 +31,7 @@ export const Plugin = define<Scope.Scope | ClaudeStatus.Service>({
   effect: Effect.fn("ClaudeProvider.Plugin")(function* (ctx) {
     const status = yield* ClaudeStatus.Service
     const saved = Schema.decodeUnknownOption(Catalog)(yield* ctx.storage.get(CATALOG_KEY))
-    const current = { catalog: Option.getOrElse(saved, () => FALLBACK) }
+    let catalog = Option.getOrElse(saved, () => FALLBACK)
 
     yield* ctx.provider.transform((editor) => {
       editor.add({
@@ -41,7 +41,7 @@ export const Plugin = define<Scope.Scope | ClaudeStatus.Service>({
           activation: "auto",
           package: `aisdk:${SdkPlaceholder.url}`,
         },
-        models: current.catalog.map(toModel),
+        models: catalog.map(toModel),
       })
     })
 
@@ -49,9 +49,9 @@ export const Plugin = define<Scope.Scope | ClaudeStatus.Service>({
       Stream.runForEach((state) =>
         Effect.gen(function* () {
           if (state.type !== "ready") return
-          const catalog = fromClaude(state.probe.models)
-          if (JSON.stringify(catalog) === JSON.stringify(current.catalog)) return
-          current.catalog = catalog
+          const next = fromClaude(state.probe.models)
+          if (JSON.stringify(next) === JSON.stringify(catalog)) return
+          catalog = next
           yield* ctx.storage.set(CATALOG_KEY, catalog)
           yield* ctx.provider.reload()
         }),

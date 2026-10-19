@@ -29,7 +29,7 @@ export const make = Effect.fn("ClaudeStatus.make")(function* (input: {
   // Reconnecting must check again after startup, rather than race it with an older account snapshot.
   const refresh = Effect.fn("ClaudeStatus.refresh")(
     function* () {
-      const executable = input.options.claudePath ?? input.io.which()
+      const executable = ClaudeQueryOptions.executable(input)
       if (!executable) return yield* SubscriptionRef.set(state, { type: "missing" })
       const next = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable, io: input.io })).pipe(
         Effect.map((probe): State => ({ type: "ready", probe,

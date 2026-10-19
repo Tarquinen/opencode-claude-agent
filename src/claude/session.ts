@@ -4,7 +4,7 @@ import { query, type Options, type SDKMessage, type SDKResultMessage, type SDKUs
 import { ClaudeProbe } from "./probe.js"
 
 interface Turn {
-  readonly result: PromiseWithResolvers<SDKResultMessage>
+  readonly drained: PromiseWithResolvers<void>
   readonly messages: SDKMessage[]
   wake?: () => void
   finished: boolean
@@ -40,14 +40,14 @@ export function start(options: Options) {
         if (message.type === "result") {
           persisted = true
           if (turn) turn.finished = true
-          turn?.result.resolve(message)
+          turn?.drained.resolve()
         }
       }
     } catch (error) {
       failure = error
     } finally {
       ended = true
-      turn?.result.reject(failure ?? new Error("Claude Code stopped before finishing its reply"))
+      turn?.drained.reject(failure ?? new Error("Claude Code stopped before finishing its reply"))
       turn?.wake?.()
     }
   })()
@@ -57,7 +57,7 @@ export function start(options: Options) {
     if (!active || active.finished) return
     await session.interrupt()
     // The interrupt receipt precedes the result and transcript flush. Do not send another turn yet.
-    await active.result.promise
+    await active.drained.promise
   }
 
   async function stop() {
@@ -66,7 +66,7 @@ export function start(options: Options) {
       try {
         if (initialized && !ended) {
           await session.interrupt()
-          if (turn && !turn.finished) await turn.result.promise
+          if (turn && !turn.finished) await turn.drained.promise
         }
         input.close()
         // An uninitialized process has no conversation to flush.
@@ -82,10 +82,10 @@ export function start(options: Options) {
   function begin(content: SDKUserMessage["message"]["content"], uuid = crypto.randomUUID()) {
     if (ended || stopping) throw failure ?? new Error("Claude Code session has stopped")
     if (turn && !turn.finished) throw new Error("Claude Code is still finishing the previous turn")
-    const result = Promise.withResolvers<SDKResultMessage>()
+    const drained = Promise.withResolvers<void>()
     // The reader reports process failures too; this promise is also used by interrupt-and-drain.
-    void result.promise.catch(() => {})
-    turn = { result, messages: [], finished: false }
+    void drained.promise.catch(() => {})
+    turn = { drained, messages: [], finished: false }
     input.enqueue({ type: "user", uuid, message: { role: "user", content }, parent_tool_use_id: null })
   }
 
