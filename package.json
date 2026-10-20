@@ -22,7 +22,7 @@
     "which": "6.0.1"
   },
   "peerDependencies": {
-    "@opencode/plugin": "^2.0.31 || ^0.0.0-dev",
+    "@opencode/plugin": "^2.0.25 || ^0.0.0-dev",
     "effect": "^4.0.0"
   },
   "devDependencies": {

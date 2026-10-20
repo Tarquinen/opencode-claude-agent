@@ -6,6 +6,8 @@ Not intended for release. See [PLAN.md](./PLAN.md) for the research, design and 
 
 ## Local setup
 
+Requires OpenCode 2.0.25 or newer.
+
 1. Install Claude Code and sign in with `claude auth login` on the machine running OpenCode. An existing login is reused.
 2. Run `bun install` in this repository and add its absolute path to the `plugins` array in OpenCode's configuration, for example `~/.config/opencode/opencode.jsonc`:
 

@@ -460,7 +460,7 @@ Versions are pinned exactly, matching opencode's catalog where opencode uses the
 - `@modelcontextprotocol/sdk` 1.x, for the MCP server built from JSON Schemas. opencode core uses the 2.0 split packages, but the Agent SDK requires 1.x.
 - `@ai-sdk/provider` 3.0.8, for the `LanguageModelV3` types, as in opencode.
 - `which` 6.0.1, to find `claude`, as in opencode core.
-- `@opencode/plugin` and `effect` as peer dependencies with ranges (`^2.0.31 || ^0.0.0-dev`, `^4.0.0`), and exact dev dependencies. opencode supplies its own copies at runtime (`packages/plugin/src/runtime.ts:17-33`), and plugins must never bundle `effect`.
+- `@opencode/plugin` and `effect` as peer dependencies with ranges (`^2.0.25 || ^0.0.0-dev`, `^4.0.0`), and exact dev dependencies. opencode supplies its own copies at runtime (`packages/plugin/src/runtime.ts:17-33`), and plugins must never bundle `effect`.
 - `@opencode/sdk` (published on npm), the same version as `@opencode/plugin`, as a dev dependency for running opencode inside tests.
 - Tooling matches opencode: `tsc` from `@typescript/native` (`npm:typescript@7.0.2`), `tsconfig.json` extending `@tsconfig/bun`, `@types/bun` 1.4.0 and prettier 3.6.2.
 - We always pass the user's `claude` binary, so the SDK's bundled Claude Code binary is never run. It is an optional dependency of about 250 MB per platform that npm and Bun still download. Skipping optional dependencies isn't an option here, because TypeScript 7 ships its compiler the same way. Once built in, opencode compiles to one executable that includes only the SDK's JavaScript, so the binary would not ship.
