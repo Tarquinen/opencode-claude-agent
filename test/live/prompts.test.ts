@@ -48,7 +48,7 @@ describe.skipIf(!live)("system prompt compatibility", () => {
   test("planned additions with subscription auth, including a real SDK MCP call", async () => {
     const base = ClaudeQueryOptions.base({ executable: ClaudeIO.real.which()!, io: ClaudeIO.real })
     const probe = await Effect.runPromise(ClaudeProbe.run(base))
-    expect(ClaudeProbe.isSubscription(probe.account)).toBe(true)
+    expect(ClaudeProbe.isLoggedIn(probe.account)).toBe(true)
     const directory = await mkdtemp("/tmp/opencode/prompt-matrix-")
     const opencode = readFileSync(new URL("../fixtures/opencode-system.txt", import.meta.url), "utf8")
     const full = [runtime, routing, catalog, mcp, skills, role, agents].join("\n\n")

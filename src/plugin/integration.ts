@@ -62,8 +62,7 @@ function problem(state: ClaudeStatus.State): Connection.Status | undefined {
       url: "https://code.claude.com/docs/en/setup",
     }
   if (state.type === "failed") return { status: "needs_auth", message: `Claude Code login check failed: ${state.message}` }
-  if (state.type === "ready" && state.warning) return { status: "needs_auth", message: state.warning }
-  if (state.type === "ready" && !ClaudeProbe.isSubscription(state.probe.account))
-    return { status: "needs_auth", message: "Run `claude auth login` in a terminal and sign in with your Claude plan." }
+  if (state.type === "ready" && !ClaudeProbe.isLoggedIn(state.probe.account))
+    return { status: "needs_auth", message: "Claude Code is not logged in. Run `claude auth login` in a terminal." }
   return undefined
 }

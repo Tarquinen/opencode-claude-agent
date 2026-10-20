@@ -43,7 +43,7 @@ describe("login status", () => {
       const state = yield* SubscriptionRef.get(status.state)
       expect(state.type).toBe("ready")
       if (state.type !== "ready") throw new Error("login check did not finish")
-      expect(ClaudeProbe.isSubscription(state.probe.account)).toBe(true)
+      expect(ClaudeProbe.isLoggedIn(state.probe.account)).toBe(true)
       claude.check()
     }),
   )

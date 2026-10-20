@@ -44,11 +44,11 @@ const check = Effect.fn(function* (name: string, io: ClaudeIO.Interface) {
 
 describe.skipIf(!live)("start-up against the real claude", () => {
   it.live(
-    "the login check reports the subscription and each model's context window",
+    "the login check reports the login and each model's context window",
     () =>
       Effect.gen(function* () {
         const result = yield* check("startup", ClaudeIO.real)
-        expect(ClaudeProbe.isSubscription(result.account)).toBe(true)
+        expect(ClaudeProbe.isLoggedIn(result.account)).toBe(true)
         expect(result.models.map((model) => model.value)).toContain("sonnet")
         for (const model of result.models) {
           if (model.value !== "default") expect(model.contextWindow).toBeGreaterThan(0)
@@ -74,7 +74,7 @@ describe.skipIf(!live)("start-up against the real claude", () => {
     () =>
       Effect.gen(function* () {
         const result = yield* check("startup-logged-out", yield* loggedOutIO)
-        expect(ClaudeProbe.isSubscription(result.account)).toBe(false)
+        expect(ClaudeProbe.isLoggedIn(result.account)).toBe(false)
       }),
     TIMEOUT,
   )

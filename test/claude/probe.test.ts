@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 import { ClaudeProbe } from "../../src/claude/probe.js"
@@ -39,7 +39,7 @@ describe("login check", () => {
       // Simple mode skips the subscription login
       expect(run.env.CLAUDE_CODE_SIMPLE).toBeUndefined()
 
-      expect(ClaudeProbe.isSubscription(result.account)).toBe(true)
+      expect(ClaudeProbe.isLoggedIn(result.account)).toBe(true)
       expect(result.models.map((model) => model.value)).toContain("sonnet")
     }),
   )
@@ -70,7 +70,7 @@ describe("login check", () => {
     context.replies[0].response.response.rawMaxTokens = 0
     const claude = FakeClaude.make(steps)
     const result = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable: FakeIO.EXECUTABLE, io: FakeIO.make({ claude }) }))
-    expect(ClaudeProbe.isSubscription(result.account)).toBe(true)
+    expect(ClaudeProbe.isLoggedIn(result.account)).toBe(true)
     expect(result.models.find((model) => model.value === "opus")?.contextWindow).toBeUndefined()
     expect(result.models.find((model) => model.value === "sonnet")?.contextWindow).toBe(1_000_000)
     claude.check()
@@ -85,7 +85,7 @@ describe("login check", () => {
     yield* Effect.promise(() => claude.started(context))
     yield* TestClock.adjust("30 seconds")
     const result = yield* Fiber.join(check)
-    expect(ClaudeProbe.isSubscription(result.account)).toBe(true)
+    expect(ClaudeProbe.isLoggedIn(result.account)).toBe(true)
     expect(result.models.find((model) => model.value === "opus")?.contextWindow).toBeUndefined()
     yield* Effect.promise(() => claude.runs[0]!.closed)
     expect(() => claude.check()).toThrow("1 script steps did not finish")
@@ -139,4 +139,15 @@ describe("login check", () => {
       yield* Effect.promise(() => claude.runs[0]!.closed)
     }),
   )
+})
+
+describe("logged-in check", () => {
+  test("every login Claude Code supports counts, and only a missing credential does not", () => {
+    expect(ClaudeProbe.isLoggedIn({ subscriptionType: "Claude Team", apiProvider: "firstParty" })).toBe(true)
+    expect(ClaudeProbe.isLoggedIn({ tokenSource: "none", apiKeySource: "ANTHROPIC_API_KEY", apiProvider: "firstParty" })).toBe(true)
+    expect(ClaudeProbe.isLoggedIn({ tokenSource: "ANTHROPIC_AUTH_TOKEN", apiProvider: "firstParty" })).toBe(true)
+    expect(ClaudeProbe.isLoggedIn({ tokenSource: "CLAUDE_CODE_OAUTH_TOKEN", apiProvider: "firstParty" })).toBe(true)
+    expect(ClaudeProbe.isLoggedIn({ apiProvider: "vertex" })).toBe(true)
+    expect(ClaudeProbe.isLoggedIn({ tokenSource: "none", apiProvider: "firstParty" })).toBe(false)
+  })
 })

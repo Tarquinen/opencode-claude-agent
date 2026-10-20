@@ -343,7 +343,7 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | Native agent max steps drains parked tools, removes the catalog, and summarizes authoritative results | 3, 4 | 6 |
 | A "successful" result after server errors (`api_error_status`) becomes an error without outer retries | 1, 3 | 6 |
 | Plan-limit events: "rejected" vs "allowed", weekly reset dates and a single visible terminal error | 1, 3 | 6 |
-| An `ANTHROPIC_API_KEY` in the environment shows the billing warning | 3 | 6 |
+| An API-key login is not a sign-in problem, and its models work | 3 | 6 |
 
 ## Folder layout
 

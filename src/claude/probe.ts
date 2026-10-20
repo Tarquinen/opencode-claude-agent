@@ -82,10 +82,8 @@ const discoverContext = Effect.fn("ClaudeProbe.discoverContext")(
   }),
 )
 
-export function isSubscription(account: AccountInfo) {
-  if (account.apiProvider !== undefined && account.apiProvider !== "firstParty") return false
-  if (account.apiKeySource !== undefined) return false
-  return account.subscriptionType !== undefined
+export function isLoggedIn(account: AccountInfo) {
+  return account.tokenSource !== "none" || account.apiKeySource !== undefined
 }
 
 async function* waitFor(done: Promise<void>): AsyncGenerator<never> {
