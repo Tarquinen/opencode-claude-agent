@@ -2,7 +2,7 @@
 
 Experimental opencode plugin that runs a user's own Claude subscription inside opencode through Claude Code, using only documented features of the Claude Agent SDK.
 
-Not intended for release. See [PLAN.md](./PLAN.md) for the research, design and order of work, [TESTING.md](./TESTING.md) for how it is tested, and [OPENCODE-FIX.md](./OPENCODE-FIX.md) for the opencode fix the plugin's provider loading needs.
+Not intended for release. See [PLAN.md](./PLAN.md) for the research, design and order of work, [TESTING.md](./TESTING.md) for how it is tested.
 
 ## Local setup
 
