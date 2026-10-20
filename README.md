@@ -17,11 +17,3 @@ Not intended for release. See [PLAN.md](./PLAN.md) for the research, design and 
    ```
 
 3. In OpenCode, use `/connect` → **Claude Agent**, then `/models` to choose a model and effort level.
-
-## Development
-
-Run these from this folder:
-
-- `bun typecheck`
-- `bun test`, or `bun run test:live` for the tests that call the real `claude` (they use your plan's limits)
-- `bun run format`
