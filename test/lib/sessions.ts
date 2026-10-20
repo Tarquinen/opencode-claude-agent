@@ -15,18 +15,27 @@ export function storage() {
   const data = new Map<string, unknown>()
   const ids = new Set<string>()
   return {
-    data, ids,
+    data,
+    ids,
     get: (key: string) => Effect.sync(() => data.get(key)),
-    set: (key: string, value: SessionRecord.Record) => Effect.sync(() => { data.set(key, value); ids.add(value.claudeSessionID) }),
+    set: (key: string, value: SessionRecord.Record) =>
+      Effect.sync(() => {
+        data.set(key, value)
+        ids.add(value.claudeSessionID)
+      }),
   }
 }
 
 export function prompt(text: string): LanguageModelV3Prompt {
-  return [{ role: "system", content: "You are a concise test assistant." }, { role: "user", content: [{ type: "text", text }] }]
+  return [
+    { role: "system", content: "You are a concise test assistant." },
+    { role: "user", content: [{ type: "text", text }] },
+  ]
 }
 
 export function followup(text = "What was the marker? Reply only with it."): LanguageModelV3Prompt {
-  return [...prompt("Remember the marker COPPER-OTTER. Reply only with that marker."),
+  return [
+    ...prompt("Remember the marker COPPER-OTTER. Reply only with that marker."),
     { role: "assistant", content: [{ type: "text", text: "COPPER-OTTER" }] },
     { role: "user", content: [{ type: "text", text }] },
   ]
@@ -56,8 +65,15 @@ export async function send(session: ClaudeSession.Interface, content: SDKUserMes
   }
 }
 
-export function stream(model: ClaudeAgentLanguageModel.Model, prompt: LanguageModelV3Prompt, sessionID = "session-a", kind: RequestKind.Kind = "primary") {
-  return Effect.promise(() => model.doStream({ prompt, headers: { [RequestKind.SESSION_HEADER]: sessionID, [RequestKind.HEADER]: kind } }))
+export function stream(
+  model: ClaudeAgentLanguageModel.Model,
+  prompt: LanguageModelV3Prompt,
+  sessionID = "session-a",
+  kind: RequestKind.Kind = "primary",
+) {
+  return Effect.promise(() =>
+    model.doStream({ prompt, headers: { [RequestKind.SESSION_HEADER]: sessionID, [RequestKind.HEADER]: kind } }),
+  )
 }
 
 export async function collect(stream: ReadableStream<LanguageModelV3StreamPart>) {
@@ -67,12 +83,18 @@ export async function collect(stream: ReadableStream<LanguageModelV3StreamPart>)
 }
 
 export function text(parts: readonly LanguageModelV3StreamPart[]) {
-  let text = ""
-  for (const part of parts) if (part.type === "text-delta") text += part.delta
-  return text
+  return parts
+    .filter((part) => part.type === "text-delta")
+    .map((part) => part.delta)
+    .join("")
 }
 
-export const reply = Effect.fn(function* (model: ClaudeAgentLanguageModel.Model, prompt: LanguageModelV3Prompt, sessionID = "session-a", kind: RequestKind.Kind = "primary") {
+export const reply = Effect.fn(function* (
+  model: ClaudeAgentLanguageModel.Model,
+  prompt: LanguageModelV3Prompt,
+  sessionID = "session-a",
+  kind: RequestKind.Kind = "primary",
+) {
   const result = yield* stream(model, prompt, sessionID, kind)
   return yield* Effect.tryPromise(() => collect(result.stream))
 })

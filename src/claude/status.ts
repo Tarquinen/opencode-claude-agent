@@ -1,6 +1,6 @@
 export * as ClaudeStatus from "./status.js"
 
-import { Context, Effect, Semaphore, SubscriptionRef } from "effect"
+import { Effect, Semaphore, SubscriptionRef } from "effect"
 import type { ClaudeAgentOptions } from "../options.js"
 import { ClaudeIO } from "./io.js"
 import { ClaudeProbe } from "./probe.js"
@@ -17,8 +17,6 @@ export interface Interface {
   readonly refresh: () => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("claude-agent/ClaudeStatus") {}
-
 export const make = Effect.fn("ClaudeStatus.make")(function* (input: {
   readonly options: ClaudeAgentOptions.Options
   readonly io: ClaudeIO.Interface
@@ -27,22 +25,20 @@ export const make = Effect.fn("ClaudeStatus.make")(function* (input: {
   const lock = yield* Semaphore.make(1)
 
   // Serialized so a reconnect checks again after startup, rather than racing it with an older account snapshot.
-  const refresh = Effect.fn("ClaudeStatus.refresh")(
-    function* () {
-      const executable = ClaudeQueryOptions.executable(input)
-      if (!executable) return yield* SubscriptionRef.set(state, { type: "missing" })
-      const next = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable, io: input.io })).pipe(
-        Effect.map((probe): State => ({ type: "ready", probe })),
-        Effect.catch((error) =>
-          Effect.logWarning("Claude Code login check failed", { cause: error.cause }).pipe(
-            Effect.as<State>({ type: "failed", message: String(error.cause) }),
-          ),
+  const refresh = Effect.fn("ClaudeStatus.refresh")(function* () {
+    const executable = ClaudeQueryOptions.executable(input)
+    if (!executable) return yield* SubscriptionRef.set(state, { type: "missing" })
+    const next = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable, io: input.io })).pipe(
+      Effect.map((probe): State => ({ type: "ready", probe })),
+      Effect.catch((error) =>
+        Effect.logWarning("Claude Code login check failed", { cause: error.cause }).pipe(
+          Effect.as<State>({ type: "failed", message: String(error.cause) }),
         ),
-      )
-      yield* SubscriptionRef.set(state, next)
-    },
-    lock.withPermit,
-  )
+      ),
+    )
+    yield* SubscriptionRef.set(state, next)
+  }, lock.withPermit)
 
-  return Service.of({ state, refresh })
+  const status: Interface = { state, refresh }
+  return status
 })

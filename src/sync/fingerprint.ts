@@ -40,18 +40,28 @@ function visible(message: Exclude<LanguageModelV3Message, { role: "system" }>) {
     if (text) parts.push({ type: "text", text })
     text = ""
     if (part.type === "file") {
-      let data: string
-      if (part.data instanceof URL) data = part.data.href
-      else if (typeof part.data === "string") data = part.data
-      else data = Buffer.from(part.data).toString("base64")
+      const data =
+        part.data instanceof URL
+          ? part.data.href
+          : typeof part.data === "string"
+            ? part.data
+            : Buffer.from(part.data).toString("base64")
       parts.push({ type: part.type, mediaType: part.mediaType, data })
-    } else if (part.type === "tool-call") {
+      continue
+    }
+    if (part.type === "tool-call") {
       parts.push({ type: part.type, id: part.toolCallId, name: part.toolName, input: part.input })
-    } else if (part.type === "tool-result") {
+      continue
+    }
+    if (part.type === "tool-result") {
       const output = { ...part.output }
       if ("providerOptions" in output) delete output.providerOptions
       if (output.type === "content") {
-        output.value = output.value.map(({ providerOptions, ...item }) => item)
+        output.value = output.value.map((part) => {
+          const item = { ...part }
+          delete item.providerOptions
+          return item
+        })
       }
       parts.push({ type: part.type, id: part.toolCallId, name: part.toolName, output })
     }
@@ -62,9 +72,13 @@ function visible(message: Exclude<LanguageModelV3Message, { role: "system" }>) {
 
 // OpenCode lowers tool attachments into this separate user message.
 function isToolMedia(message: LanguageModelV3Message) {
-  return message.role === "user" && message.content.length > 1
-    && message.content[0]?.type === "text" && message.content[0].text === "Attached media from tool result:"
-    && message.content.slice(1).every((part) => part.type === "file")
+  return (
+    message.role === "user" &&
+    message.content.length > 1 &&
+    message.content[0]?.type === "text" &&
+    message.content[0].text === "Attached media from tool result:" &&
+    message.content.slice(1).every((part) => part.type === "file")
+  )
 }
 
 export function groups(prompt: LanguageModelV3Prompt): Group[] {
@@ -86,7 +100,8 @@ export function groups(prompt: LanguageModelV3Prompt): Group[] {
         i++
       }
       members.sort()
-    } else if (message.role === "tool") {
+    }
+    if (message.role === "tool") {
       const next = prompt[i]
       if (next && next.role === "user" && isToolMedia(next)) {
         members.push(hash(visible(next)))

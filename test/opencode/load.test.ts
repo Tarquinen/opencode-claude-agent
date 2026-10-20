@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import type { SDKControlInitializeResponse } from "@anthropic-ai/claude-agent-sdk"
 import { Model } from "@opencode/plugin/effect"
 import path from "node:path"
 import { Effect } from "effect"
@@ -26,10 +27,8 @@ describe("loading the plugin", () => {
       hold.resolve()
       yield* Effect.promise(() => claude.reached(onConnect))
       const ids = yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.length > 3)
-      const recorded: string[] = []
-      for (const model of Recorder.startupReply(Recorder.load("startup")).models) {
-        if (model.value !== "default") recorded.push(model.value)
-      }
+      const startup: SDKControlInitializeResponse = Recorder.startupReply(Recorder.load("startup"))
+      const recorded = startup.models.filter((model) => model.value !== "default").map((model) => model.value)
       expect(ids).toEqual(recorded)
       const models = yield* test.opencode.model.list()
       const sonnet = models.data.find((model) => model.providerID === ClaudeProvider.ID && model.id === "sonnet")
@@ -37,7 +36,9 @@ describe("loading the plugin", () => {
       expect(sonnet?.variants).toContainEqual({ id: Model.VariantID.make("high"), settings: { effort: "high" } })
       expect(haiku?.family).toBe(Model.Family.make("claude-haiku"))
       expect(sonnet?.limit).toEqual({ context: 1_000_000, output: 0 })
-      const older = models.data.find((model) => model.providerID === ClaudeProvider.ID && model.id === "claude-opus-4-6")
+      const older = models.data.find(
+        (model) => model.providerID === ClaudeProvider.ID && model.id === "claude-opus-4-6",
+      )
       expect(older?.limit.context).toBe(200_000)
       for (const model of models.data) {
         if (model.providerID !== ClaudeProvider.ID) continue
@@ -71,7 +72,9 @@ describe("loading the plugin", () => {
       yield* Effect.promise(() => claude.started(startup))
       expect(yield* TestOpenCode.models(test.opencode)).toEqual(saved)
       const models = yield* test.opencode.model.list()
-      expect(models.data.find((model) => model.providerID === ClaudeProvider.ID && model.id === "opus")?.limit.context).toBe(1_000_000)
+      expect(
+        models.data.find((model) => model.providerID === ClaudeProvider.ID && model.id === "opus")?.limit.context,
+      ).toBe(1_000_000)
 
       hold.resolve()
       yield* Effect.promise(() => claude.reached(startup))
@@ -103,26 +106,46 @@ describe("loading the plugin", () => {
     Effect.gen(function* () {
       const onConnect = FakeClaude.expectStartup()
       // Generate loads its location's plugin instance as well as the server-level provider catalog.
-      const claude = FakeClaude.make([FakeClaude.expectStartup(), onConnect, FakeClaude.expectStartup(), FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt()])
+      const claude = FakeClaude.make([
+        FakeClaude.expectStartup(),
+        onConnect,
+        FakeClaude.expectStartup(),
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn(),
+        FakeClaude.expectInterrupt(),
+      ])
       const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }) })
       yield* TestOpenCode.connect(test.opencode)
       yield* Effect.promise(() => claude.reached(onConnect))
-      const result = yield* test.opencode.generate
-        .text({ prompt: "hello", model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("sonnet") }) })
+      const result = yield* test.opencode.generate.text({
+        prompt: "hello",
+        model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("sonnet") }),
+      })
       expect(result.text).toBe("COPPER-OTTER")
       claude.check()
     }),
   )
 
-  it.live("an API-key login is not a sign-in problem, and its models work", () => Effect.gen(function* () {
-    const claude = FakeClaude.make([FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt()], { probes: true })
-    const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude, env: { ANTHROPIC_API_KEY: "fixture-secret" } }) })
-    yield* TestOpenCode.connect(test.opencode)
-    yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.some((id) => id.startsWith("claude-")))
-    expect((yield* TestOpenCode.connection(test.opencode))?.status).toBeUndefined()
-    const result = yield* test.opencode.generate.text({ prompt: "hello",
-      model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }) })
-    expect(result.text).toBe("COPPER-OTTER")
-    claude.check()
-  }))
+  it.live("an API-key login is not a sign-in problem, and its models work", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make(
+        [FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt()],
+        { probes: true },
+      )
+      const test = yield* TestOpenCode.start({
+        io: FakeIO.make({ claude, env: { ANTHROPIC_API_KEY: "fixture-secret" } }),
+      })
+      yield* TestOpenCode.connect(test.opencode)
+      yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) =>
+        ids.some((id) => id.startsWith("claude-")),
+      )
+      expect((yield* TestOpenCode.connection(test.opencode))?.status).toBeUndefined()
+      const result = yield* test.opencode.generate.text({
+        prompt: "hello",
+        model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }),
+      })
+      expect(result.text).toBe("COPPER-OTTER")
+      claude.check()
+    }),
+  )
 })

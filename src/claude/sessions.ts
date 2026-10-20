@@ -1,8 +1,13 @@
 export * as ClaudeSessions from "./sessions.js"
 
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk"
-import type { LanguageModelV3FunctionTool, LanguageModelV3Prompt, LanguageModelV3TextPart, LanguageModelV3ToolCallPart } from "@ai-sdk/provider"
-import { Context, Effect, Fiber, Semaphore } from "effect"
+import type {
+  LanguageModelV3FunctionTool,
+  LanguageModelV3Prompt,
+  LanguageModelV3TextPart,
+  LanguageModelV3ToolCallPart,
+} from "@ai-sdk/provider"
+import { Effect, Fiber, Semaphore } from "effect"
 import { ClaudeIO } from "./io.js"
 import { ClaudeQueryOptions } from "./query-options.js"
 import { ClaudeSession } from "./session.js"
@@ -61,11 +66,9 @@ export interface Interface {
   readonly run: (request: Request) => Effect.Effect<void, Error>
 }
 
-export class Service extends Context.Service<Service, Interface>()("claude-agent/Sessions") {}
-
 const launch = (request: Request) => JSON.stringify([request.maxOutputTokens, request.system, request.tools])
 
-const toError = (error: unknown) => error instanceof Error ? error : new Error(String(error))
+const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)))
 const attempt = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: toError })
 const attemptSync = <A>(run: () => A) => Effect.try({ try: run, catch: toError })
 
@@ -89,10 +92,14 @@ export function registry() {
   const stop = Effect.fn("ClaudeSessions.stop")(function* (entry: Entry) {
     const process = entry.process
     if (!process) return
-    yield* attempt(() => process.session.stop()).pipe(Effect.ensuring(Effect.sync(() => {
-      process.pending.clear()
-      entry.process = undefined
-    })))
+    yield* attempt(() => process.session.stop()).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          process.pending.clear()
+          entry.process = undefined
+        }),
+      ),
+    )
   }, Effect.uninterruptible)
 
   const closeEntries = Effect.fn("ClaudeSessions.closeEntries")(function* () {
@@ -125,31 +132,37 @@ export function registry() {
     const records = SessionRecord.make(input.storage)
     owners++
     yield* cancelHandover()
-    yield* Effect.addFinalizer(() => Effect.gen(function* () {
-      owners--
-      if (owners !== 0) return
-      if (entries.size === 0 && temporary.size === 0) return
-      handover = yield* Effect.sleep(HANDOVER_MS).pipe(Effect.andThen(closeEntries()), Effect.forkDetach)
-    }))
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        owners--
+        if (owners !== 0) return
+        if (entries.size === 0 && temporary.size === 0) return
+        handover = yield* Effect.sleep(HANDOVER_MS).pipe(Effect.andThen(closeEntries()), Effect.forkDetach)
+      }),
+    )
 
     const open = Effect.fn("ClaudeSessions.open")(function* (entry: Entry, request: Request) {
       if (!entry.process) {
         const executable = ClaudeQueryOptions.executable(input)
         if (!executable) return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
         const pending = PendingTools.make()
-        const session = yield* attemptSync(() => ClaudeSession.start(ClaudeQueryOptions.session({
-          executable,
-          io: input.io,
-          directory: input.directory,
-          model: request.model,
-          effort: request.effort,
-          maxOutputTokens: request.maxOutputTokens,
-          system: request.system,
-          tools: request.tools,
-          pending,
-          persist: request.sessionID !== undefined,
-          resume: entry.record?.claudeSessionID,
-        })))
+        const session = yield* attemptSync(() =>
+          ClaudeSession.start(
+            ClaudeQueryOptions.session({
+              executable,
+              io: input.io,
+              directory: input.directory,
+              model: request.model,
+              effort: request.effort,
+              maxOutputTokens: request.maxOutputTokens,
+              system: request.system,
+              tools: request.tools,
+              pending,
+              persist: request.sessionID !== undefined,
+              resume: entry.record?.claudeSessionID,
+            }),
+          ),
+        )
         entry.process = { session, pending, model: request.model, effort: request.effort, launch: launch(request) }
       }
       const process = entry.process
@@ -170,7 +183,12 @@ export function registry() {
       return process
     })
 
-    const turn = Effect.fn("ClaudeSessions.turn")(function* (entry: Entry, request: Request, start: number, continuation?: ToolContinuation) {
+    const turn = Effect.fn("ClaudeSessions.turn")(function* (
+      entry: Entry,
+      request: Request,
+      start: number,
+      continuation?: ToolContinuation,
+    ) {
       // Validate before opening a process: a rejected rebuild must not pair an empty process with the old record.
       const content = yield* attemptSync(() => {
         if (request.sessionID || entry.record) return CatchUp.content(request.prompt, continuation?.end ?? start)
@@ -190,21 +208,29 @@ export function registry() {
 
       const emit = (message: SDKMessage) => {
         if (message.type === "system" && message.subtype === "init" && request.tools.length > 0) {
-          const connected = message.mcp_servers.some((server) => server.name === "opencode" && server.status === "connected")
+          const connected = message.mcp_servers.some(
+            (server) => server.name === "opencode" && server.status === "connected",
+          )
           if (!connected) throw new Error("The OpenCode tool server did not connect to Claude Code")
         }
-        if (message.type === "assistant" && message.parent_tool_use_id === null && !message.error && !seen.has(message.uuid)) {
+        if (
+          message.type === "assistant" &&
+          message.parent_tool_use_id === null &&
+          !message.error &&
+          !seen.has(message.uuid)
+        ) {
           seen.add(message.uuid)
           messageID = message.uuid
           for (const part of message.message.content) {
             if (part.type === "text") {
               reply.push({ type: "text", text: part.text })
-            } else if (part.type === "tool_use") {
-              const name = ToolNames.original(part.name, request.tools)
-              live.pending.expect(part.id, part.name)
-              waiting.push(part.id)
-              reply.push({ type: "tool-call", toolCallId: part.id, toolName: name, input: part.input })
+              continue
             }
+            if (part.type !== "tool_use") continue
+            const name = ToolNames.original(part.name, request.tools)
+            live.pending.expect(part.id, part.name)
+            waiting.push(part.id)
+            reply.push({ type: "tool-call", toolCallId: part.id, toolName: name, input: part.input })
           }
         }
         if (message.type === "user" && message.uuid && Array.isArray(message.message.content)) {
@@ -218,13 +244,12 @@ export function registry() {
       let completed = false
       let parked = false
       const step = Effect.gen(function* () {
+        if (!continuation) session.begin(content, userID)
         if (continuation) {
           if (userID !== undefined) session.addUser(content, userID)
-          for (const { id, result } of continuation.results) {
-            live.pending.resolve(id, result)
+          for (const item of continuation.results) {
+            live.pending.resolve(item.id, item.result)
           }
-        } else {
-          session.begin(content, userID)
         }
         const outcome = yield* attempt(() => session.readStep(emit))
         parked = outcome === "tools"
@@ -240,10 +265,16 @@ export function registry() {
 
       const saveRecord = Effect.gen(function* () {
         if (!request.sessionID || !session.persisted) return
-        let history: SessionRecord.Checkpoint[] | undefined
-        if (completed) {
-          history = Checkpoints.build({ prompt: request.prompt, previous: entry.record, userID, reply, messageID, toolMessages })
-        }
+        const history = completed
+          ? Checkpoints.build({
+              prompt: request.prompt,
+              previous: entry.record,
+              userID,
+              reply,
+              messageID,
+              toolMessages,
+            })
+          : undefined
         entry.record = { claudeSessionID: session.id, history }
         yield* records.set(request.sessionID, entry.record)
       })
@@ -256,7 +287,8 @@ export function registry() {
       if (!request.sessionID) {
         yield* stop(entry).pipe(Effect.catch((error) => Effect.logWarning(error)))
         const sessionID = entry.record?.claudeSessionID
-        if (sessionID) yield* attempt(() => input.io.remove(sessionID)).pipe(Effect.catch((error) => Effect.logWarning(error)))
+        if (sessionID)
+          yield* attempt(() => input.io.remove(sessionID)).pipe(Effect.catch((error) => Effect.logWarning(error)))
         temporary.delete(entry)
         return
       }
@@ -267,7 +299,11 @@ export function registry() {
       )
     })
 
-    const branch = Effect.fn("ClaudeSessions.branch")(function* (entry: Entry, request: Request, source?: SessionRecord.Record) {
+    const branch = Effect.fn("ClaudeSessions.branch")(function* (
+      entry: Entry,
+      request: Request,
+      source?: SessionRecord.Record,
+    ) {
       const boundary = SyncDecision.boundary(request.prompt, source)
       if (!source || !boundary) return 0
       // Validate catch-up input before creating a forked transcript on disk.
@@ -289,8 +325,7 @@ export function registry() {
       const copy = Effect.gen(function* () {
         // Compaction ends the old primary context. Generate only takes a read-only snapshot.
         if (request.compaction && source) yield* stop(source)
-        let record = source?.record
-        if (!record) record = yield* records.get(sourceID)
+        const record = source?.record ?? (yield* records.get(sourceID))
         return yield* branch(entry, request, record)
       })
       // Hold the source only while copying its settled prefix, never during side-call inference.
@@ -312,24 +347,22 @@ export function registry() {
 
       if (!entry.record) entry.record = yield* records.get(request.sessionID)
       const decision = SyncDecision.decide(request.prompt, entry.record)
-      let start = decision.start
-      if (decision.kind === "fresh" || decision.kind === "changed") {
-        yield* stop(entry)
-        const previous = entry.record
-        entry.record = undefined
-        if (decision.kind === "changed") {
-          start = yield* branch(entry, request, previous)
-        } else if (!previous) {
-          start = yield* snapshot(entry, request)
+      const start = yield* Effect.gen(function* () {
+        if (decision.kind === "fresh" || decision.kind === "changed") {
+          yield* stop(entry)
+          const previous = entry.record
+          entry.record = undefined
+          if (decision.kind === "changed") return yield* branch(entry, request, previous)
+          if (!previous) return yield* snapshot(entry, request)
+          return decision.start
         }
-      } else if (!entry.process && entry.record) {
+        if (entry.process || !entry.record) return decision.start
         const sessionID = entry.record.claudeSessionID
         const exists = yield* attempt(() => input.io.sessionExists(sessionID))
-        if (!exists) {
-          entry.record = undefined
-          start = 0
-        }
-      }
+        if (exists) return decision.start
+        entry.record = undefined
+        return 0
+      })
 
       const live = entry.process
       if (!live || !live.session.running || !live.waiting) return { start, continuation: undefined }
@@ -354,11 +387,10 @@ export function registry() {
 
     const entryFor = (request: Request) => {
       if (request.sessionID) {
-        let entry = entries.get(request.sessionID)
-        if (!entry) {
-          entry = { lock: Semaphore.makeUnsafe(1) }
-          entries.set(request.sessionID, entry)
-        }
+        const existing = entries.get(request.sessionID)
+        if (existing) return existing
+        const entry: Entry = { lock: Semaphore.makeUnsafe(1) }
+        entries.set(request.sessionID, entry)
         return entry
       }
       const entry: Entry = { lock: Semaphore.makeUnsafe(1) }
@@ -368,15 +400,17 @@ export function registry() {
 
     const run = Effect.fn("ClaudeSessions.run")(function* (request: Request) {
       const entry = entryFor(request)
-      yield* entry.lock.withPermit(Effect.gen(function* () {
-        if (entry.idle) {
-          yield* Fiber.interrupt(entry.idle)
-          entry.idle = undefined
-        }
-        entry.active = yield* Effect.withFiber(Effect.succeed)
-        const { start, continuation } = yield* prepare(entry, request)
-        yield* turn(entry, request, start, continuation)
-      }).pipe(Effect.ensuring(release(entry, request))))
+      yield* entry.lock.withPermit(
+        Effect.gen(function* () {
+          if (entry.idle) {
+            yield* Fiber.interrupt(entry.idle)
+            entry.idle = undefined
+          }
+          entry.active = yield* Effect.withFiber(Effect.succeed)
+          const prepared = yield* prepare(entry, request)
+          yield* turn(entry, request, prepared.start, prepared.continuation)
+        }).pipe(Effect.ensuring(release(entry, request))),
+      )
     })
     return { run } satisfies Interface
   })

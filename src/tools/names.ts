@@ -13,15 +13,15 @@ export function short(name: string) {
 }
 
 export function original(name: string, tools: readonly LanguageModelV3FunctionTool[]) {
-  for (const tool of tools) if (PREFIX + short(tool.name) === name) return tool.name
+  const tool = tools.find((tool) => PREFIX + short(tool.name) === name)
+  if (tool) return tool.name
   throw new Error(`Claude Code called an unregistered OpenCode tool: ${name}`)
 }
 
 export function description(tool: LanguageModelV3FunctionTool) {
-  let text = tool.description ?? ""
-  if ((tool.name === "subagent" || tool.name === "task") && text.length > 2048) {
-    const agents = /(?:Available (?:sub)?agents|Currently available agent types):/i.exec(text)
-    if (agents) text = text.slice(agents.index) + "\n\n" + text.slice(0, agents.index)
-  }
-  return text.slice(0, 2048)
+  const text = tool.description ?? ""
+  if ((tool.name !== "subagent" && tool.name !== "task") || text.length <= 2048) return text.slice(0, 2048)
+  const agents = /(?:Available (?:sub)?agents|Currently available agent types):/i.exec(text)
+  if (!agents) return text.slice(0, 2048)
+  return (text.slice(agents.index) + "\n\n" + text.slice(0, agents.index)).slice(0, 2048)
 }

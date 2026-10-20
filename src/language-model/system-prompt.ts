@@ -10,7 +10,8 @@ export const primary = {
   preset: "claude_code",
   // Agent changes must take effect when a process resumes the same native session.
   snapshot: false,
-  append: "<runtime_info>You are running in OpenCode through the Claude Code harness. Mention this only when asked.</runtime_info>",
+  append:
+    "<runtime_info>You are running in OpenCode through the Claude Code harness. Mention this only when asked.</runtime_info>",
 } satisfies Options["systemPrompt"]
 
 const routing = `<opencode_tools>
@@ -61,9 +62,6 @@ function projectInstructions(text: string) {
 }
 
 export function utility(prompt: LanguageModelV3Prompt) {
-  const blocks: string[] = []
-  for (const message of prompt) {
-    if (message.role === "system") blocks.push(message.content)
-  }
+  const blocks = prompt.filter((message) => message.role === "system").map((message) => message.content)
   return blocks.join("\n\n") || "You are a text generation helper. Return only the requested output."
 }

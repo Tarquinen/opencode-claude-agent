@@ -36,7 +36,9 @@ export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
             blocks.set(event.index, "text")
             parts.push({ type: "text-start", id })
             if (block.text) parts.push({ type: "text-delta", id, delta: block.text })
-          } else if (block.type === "thinking") {
+            break
+          }
+          if (block.type === "thinking") {
             blocks.set(event.index, "reasoning")
             parts.push({ type: "reasoning-start", id })
             if (block.thinking) parts.push({ type: "reasoning-delta", id, delta: block.thinking })
@@ -48,7 +50,9 @@ export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
           const delta = event.delta
           if (delta.type === "text_delta") {
             parts.push({ type: "text-delta", id, delta: delta.text })
-          } else if (delta.type === "thinking_delta" && delta.thinking) {
+            break
+          }
+          if (delta.type === "thinking_delta" && delta.thinking) {
             parts.push({ type: "reasoning-delta", id, delta: delta.thinking })
           }
           break
@@ -65,7 +69,11 @@ export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
         case "message_stop":
           // Must match ClaudeSession.readStep's tool boundary, or OpenCode's step ends without a finish event.
           if (calledTools) {
-            parts.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage: usage.snapshot() })
+            parts.push({
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: "tool_use" },
+              usage: usage.snapshot(),
+            })
           }
           break
       }
@@ -96,7 +104,9 @@ export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
             parts.push({ type: "text-start", id })
             parts.push({ type: "text-delta", id, delta: block.text })
             parts.push({ type: "text-end", id, providerMetadata: metadata })
-          } else if (block.type === "thinking") {
+            continue
+          }
+          if (block.type === "thinking") {
             parts.push({ type: "reasoning-start", id })
             parts.push({ type: "reasoning-delta", id, delta: block.thinking })
             parts.push({ type: "reasoning-end", id })
@@ -108,7 +118,10 @@ export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
       if (message.num_turns === 1) usage.result(message.usage)
       parts.push({
         type: "finish",
-        finishReason: { unified: message.stop_reason === "max_tokens" ? "length" : "stop", raw: message.stop_reason ?? undefined },
+        finishReason: {
+          unified: message.stop_reason === "max_tokens" ? "length" : "stop",
+          raw: message.stop_reason ?? undefined,
+        },
         usage: usage.snapshot(),
       })
     }

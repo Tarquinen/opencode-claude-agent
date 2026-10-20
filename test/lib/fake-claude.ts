@@ -3,7 +3,12 @@ export * as FakeClaude from "./fake-claude.js"
 import { EventEmitter } from "node:events"
 import { createInterface } from "node:readline"
 import { PassThrough } from "node:stream"
-import type { Options, SDKControlInitializeResponse, SessionMessage, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk"
+import type {
+  Options,
+  SDKControlInitializeResponse,
+  SessionMessage,
+  SpawnedProcess,
+} from "@anthropic-ai/claude-agent-sdk"
 import { Recorder } from "./recorder.js"
 
 // One step of a script. Each `claude` the SDK starts takes the next steps in order.
@@ -51,11 +56,19 @@ export function replay(recording: string, options: { skipProbes?: boolean } = {}
         // Older recordings only had initialization probes, without process IDs or context controls.
         if (!options.skipProbes || line.message.request.hooks) steps.push(expectStartup({ recording }))
         current = undefined
-      } else {
-        current = { type: "exchange", input: line.message, replies: [], started: Promise.withResolvers<void>(), done: Promise.withResolvers<void>() }
-        steps.push(current)
+        continue
       }
-    } else if (line.from === "claude" && current) current.replies.push(line.message)
+      current = {
+        type: "exchange",
+        input: line.message,
+        replies: [],
+        started: Promise.withResolvers<void>(),
+        done: Promise.withResolvers<void>(),
+      }
+      steps.push(current)
+      continue
+    }
+    if (line.from === "claude" && current) current.replies.push(line.message)
   }
   return steps
 }
@@ -67,8 +80,16 @@ function isProbe(args: readonly string[]) {
 
 // Text recordings predate the bridge. Mirror the offered SDK servers in their otherwise unchanged init event.
 export function withTools(message: any, initialize: any) {
-  if (message.type !== "system" || message.subtype !== "init" || message.mcp_servers.length || !initialize?.sdkMcpServers?.length) return message
-  const init = Recorder.load("tools").find((line) => line.from === "claude" && line.message.type === "system" && line.message.subtype === "init")
+  if (
+    message.type !== "system" ||
+    message.subtype !== "init" ||
+    message.mcp_servers.length ||
+    !initialize?.sdkMcpServers?.length
+  )
+    return message
+  const init = Recorder.load("tools").find(
+    (line) => line.from === "claude" && line.message.type === "system" && line.message.subtype === "init",
+  )
   if (!init || init.from !== "claude") throw new Error("Missing tool init recording")
   return { ...message, mcp_servers: init.message.mcp_servers }
 }
@@ -100,30 +121,50 @@ function recordedInput(recording: string, type: Input["type"], index: number) {
       if (found) break
       const matches = type === "user" ? line.message.type === "user" : line.message.request?.subtype === "interrupt"
       if (matches && seen++ === index) found = true
-    } else if (found && line.from === "claude") replies.push(line.message)
+      continue
+    }
+    if (found && line.from === "claude") replies.push(line.message)
   }
   if (!found) throw new Error(`No ${type} ${index} in ${recording}`)
   return replies
 }
 
-export function expectTurn(input?: { readonly recording?: string; readonly index?: number; readonly hold?: Promise<void> }): Input {
+export function expectTurn(input?: {
+  readonly recording?: string
+  readonly index?: number
+  readonly hold?: Promise<void>
+}): Input {
   return {
-    type: "user", replies: recordedInput(input?.recording ?? "text", "user", input?.index ?? 0),
-    hold: input?.hold, started: Promise.withResolvers<void>(), done: Promise.withResolvers<void>(),
+    type: "user",
+    replies: recordedInput(input?.recording ?? "text", "user", input?.index ?? 0),
+    hold: input?.hold,
+    started: Promise.withResolvers<void>(),
+    done: Promise.withResolvers<void>(),
   }
 }
 
-export function expectInterrupt(input?: { readonly recording?: string; readonly index?: number; readonly hold?: Promise<void>; readonly beforeResult?: Promise<void> }): Input {
+export function expectInterrupt(input?: {
+  readonly recording?: string
+  readonly index?: number
+  readonly hold?: Promise<void>
+  readonly beforeResult?: Promise<void>
+}): Input {
   return {
-    type: "interrupt", replies: recordedInput(input?.recording ?? "text", "interrupt", input?.index ?? 0),
-    hold: input?.hold, beforeResult: input?.beforeResult, started: Promise.withResolvers<void>(), done: Promise.withResolvers<void>(),
+    type: "interrupt",
+    replies: recordedInput(input?.recording ?? "text", "interrupt", input?.index ?? 0),
+    hold: input?.hold,
+    beforeResult: input?.beforeResult,
+    started: Promise.withResolvers<void>(),
+    done: Promise.withResolvers<void>(),
   }
 }
 
 export function replies(step: Input, requestID?: string) {
-  return step.replies.map((message) => message.type === "control_response"
-    ? { ...message, response: { ...message.response, request_id: requestID } }
-    : message)
+  return step.replies.map((message) =>
+    message.type === "control_response"
+      ? { ...message, response: { ...message.response, request_id: requestID } }
+      : message,
+  )
 }
 
 // A start-up reply from a recording, answering the request with the given ID
@@ -145,7 +186,9 @@ function loadProbeControls() {
     if (line.from === "sdk") {
       control = line.message.request?.subtype
       if (control === "set_model") model = line.message.request.model
-    } else if (line.from === "claude" && line.message.type === "control_response" && model && control) {
+      continue
+    }
+    if (line.from === "claude" && line.message.type === "control_response" && model && control) {
       controls.set(`${model}/${control}`, line.message)
     }
   }
@@ -186,7 +229,11 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
     const closed = Promise.withResolvers<void>()
     const requestIDs = new Map<string, string>()
     process.once("exit", () => closed.resolve())
-    const run: Run = { args: options.args, env: options.env, received: [], closed: closed.promise,
+    const run: Run = {
+      args: options.args,
+      env: options.env,
+      received: [],
+      closed: closed.promise,
       async exit(code) {
         process.exit(code, null)
         // Let the SDK consume stdout's end and the process exit before the next request.
@@ -204,18 +251,31 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
     return process
   }
 
-  async function answer(message: any, process: FakeProcess, closed: Promise<void>, run: Run, requestIDs: Map<string, string>) {
-    const type = message.type === "user" ? "user" : message.request?.subtype === "initialize" ? "startup" : message.request?.subtype
+  async function answer(
+    message: any,
+    process: FakeProcess,
+    closed: Promise<void>,
+    run: Run,
+    requestIDs: Map<string, string>,
+  ) {
+    const type =
+      message.type === "user"
+        ? "user"
+        : message.request?.subtype === "initialize"
+          ? "startup"
+          : message.request?.subtype
     // Embedded OpenCode loads plugins for several locations. Its login probes are independent of chat ordering.
     if (probeReply && isProbe(run.args) && type === "startup") {
       process.stdout.write(JSON.stringify(startupResponse(message.request_id, probeReply)) + "\n")
       return
     }
     const step = script[next]
-    const matches = step?.type === "exchange"
-      ? message.type === step.input.type && message.request?.subtype === step.input.request?.subtype
-        && message.response?.request_id === step.input.response?.request_id
-      : type === step?.type
+    const matches =
+      step?.type === "exchange"
+        ? message.type === step.input.type &&
+          message.request?.subtype === step.input.request?.subtype &&
+          message.response?.request_id === step.input.response?.request_id
+        : type === step?.type
     if (!matches && isProbe(run.args)) {
       const model = run.received.findLast((message) => message.request?.subtype === "set_model")?.request.model
       const reply = probeResponse(message, model)
@@ -228,7 +288,8 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
       errors.push(`unexpected ${type ?? message.type}, the next step is ${step?.type ?? "the end of the script"}`)
       return
     }
-    if (step.type === "exchange" && message.type === "control_request") requestIDs.set(step.input.request_id, message.request_id)
+    if (step.type === "exchange" && message.type === "control_request")
+      requestIDs.set(step.input.request_id, message.request_id)
     next++
     if (message.type === "user") remember(run, message)
     step.started.resolve()
@@ -236,25 +297,45 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
     if (process.exitCode !== null || process.signalCode !== null) return
     if (step.type === "startup") {
       if (step.exitCode !== undefined) process.exit(step.exitCode, null)
-      else process.stdout.write(JSON.stringify(startupResponse(message.request_id, step.reply)) + "\n")
-    } else {
+      if (step.exitCode === undefined)
+        process.stdout.write(JSON.stringify(startupResponse(message.request_id, step.reply)) + "\n")
+    }
+    if (step.type !== "startup") {
       const output = step.type === "exchange" ? step.replies : replies(step, message.request_id)
-      for (let reply of output) {
-        if (reply.type === "result" && "beforeResult" in step && step.beforeResult) await Promise.race([step.beforeResult, closed])
+      for (const recorded of output) {
+        if (recorded.type === "result" && "beforeResult" in step && step.beforeResult)
+          await Promise.race([step.beforeResult, closed])
         if (process.exitCode !== null || process.signalCode !== null) return
         const initialize = run.received.find((message) => message.request?.subtype === "initialize")?.request
-        reply = withTools(reply, initialize)
+        const tools = withTools(recorded, initialize)
         // An interrupt receipt may follow another exchange, such as an MCP cancellation notification.
-        if (reply.type === "control_response" && step.type === "exchange") {
-          reply = { ...reply, response: { ...reply.response, request_id: requestIDs.get(reply.response.request_id) ?? reply.response.request_id } }
-        }
-        if (reply.type === "control_request" && reply.request.subtype === "hook_callback") {
-          const event = reply.request.input.hook_event_name
-          reply = { ...reply, request: { ...reply.request, callback_id: initialize.hooks[event][0].hookCallbackIds[0] } }
-        }
-        const sessionID = run.args.find((arg) => arg.startsWith("--session-id=") || arg.startsWith("--resume="))?.split("=")[1]
+        const response =
+          tools.type === "control_response" && step.type === "exchange"
+            ? {
+                ...tools,
+                response: {
+                  ...tools.response,
+                  request_id: requestIDs.get(tools.response.request_id) ?? tools.response.request_id,
+                },
+              }
+            : tools
+        const reply =
+          response.type === "control_request" && response.request.subtype === "hook_callback"
+            ? {
+                ...response,
+                request: {
+                  ...response.request,
+                  callback_id: initialize.hooks[response.request.input.hook_event_name][0].hookCallbackIds[0],
+                },
+              }
+            : response
+        const sessionID = run.args
+          .find((arg) => arg.startsWith("--session-id=") || arg.startsWith("--resume="))
+          ?.split("=")[1]
         remember(run, reply)
-        process.stdout.write(JSON.stringify(sessionID && "session_id" in reply ? { ...reply, session_id: sessionID } : reply) + "\n")
+        process.stdout.write(
+          JSON.stringify(sessionID && "session_id" in reply ? { ...reply, session_id: sessionID } : reply) + "\n",
+        )
       }
     }
     completed++
@@ -262,7 +343,12 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
   }
 
   function remember(run: Run, message: any) {
-    if (run.args.includes("--no-session-persistence") || !message.uuid || (message.type !== "user" && message.type !== "assistant")) return
+    if (
+      run.args.includes("--no-session-persistence") ||
+      !message.uuid ||
+      (message.type !== "user" && message.type !== "assistant")
+    )
+      return
     const id = run.args.find((arg) => arg.startsWith("--session-id=") || arg.startsWith("--resume="))?.split("=")[1]
     if (!id) return
     const messages = transcripts.get(id) ?? []
@@ -282,12 +368,11 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
       if (end < 0) return
       const sessionID = crypto.randomUUID()
       const messages = new Map<string, string>()
-      const copied = []
-      for (const message of history.slice(0, end + 1)) {
+      const copied = history.slice(0, end + 1).map((message) => {
         const uuid = crypto.randomUUID()
         messages.set(message.uuid, uuid)
-        copied.push({ ...message, session_id: sessionID, uuid })
-      }
+        return { ...message, session_id: sessionID, uuid }
+      })
       transcripts.set(sessionID, copied)
       forks.push({ source, boundary, sessionID })
       return { sessionID, messages }

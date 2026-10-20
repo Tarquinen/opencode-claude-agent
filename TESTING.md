@@ -268,7 +268,7 @@ Config options can't hold functions, so the plugin is built by a function. `clau
 ```ts
 export const make = (io: ClaudeIO.Interface, registry = ClaudeSessions.registry()) =>
   define({
-    id: "claude-agent",
+    id: ID,
     effect: Effect.fn("ClaudeAgent.Plugin")(function* (ctx) {
       // ...same as PLAN.md's entry point, with io passed to registry.attach
     }),

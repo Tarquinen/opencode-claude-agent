@@ -46,7 +46,8 @@ describe.skipIf(!opencode)("packaging", () => {
             const child = Bun.spawn([opencode!, ...args, "--standalone"], { cwd: project, env, stderr: "pipe" })
             const output = await new Response(child.stdout).text()
             const exitCode = await child.exited
-            if (exitCode !== 0) throw new Error(`opencode ${args.join(" ")} failed:\n${await new Response(child.stderr).text()}`)
+            if (exitCode !== 0)
+              throw new Error(`opencode ${args.join(" ")} failed:\n${await new Response(child.stderr).text()}`)
             return output
           })
 

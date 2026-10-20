@@ -4,7 +4,9 @@ import { ConvertClaudeStream } from "../../src/language-model/convert-claude-str
 import { Recorder } from "../lib/recorder.js"
 
 function assistant() {
-  const line = Recorder.load("branch-error").find((line) => line.from === "claude" && line.message.type === "assistant" && line.message.error)!
+  const line = Recorder.load("branch-error").find(
+    (line) => line.from === "claude" && line.message.type === "assistant" && line.message.error,
+  )!
   if (line.from !== "claude") throw new Error("Expected a recorded assistant error")
   return line.message as SDKAssistantMessage
 }
@@ -19,12 +21,21 @@ describe("terminal errors", () => {
   })
 
   test("a rejected weekly window gives its reset date, while allowed windows do not fail", () => {
-    const info = { type: "rate_limit_event", uuid: crypto.randomUUID(), session_id: crypto.randomUUID(),
-      rate_limit_info: { status: "rejected", rateLimitType: "seven_day_sonnet", resetsAt: 1792800000 } } satisfies SDKRateLimitEvent
+    const info = {
+      type: "rate_limit_event",
+      uuid: crypto.randomUUID(),
+      session_id: crypto.randomUUID(),
+      rate_limit_info: { status: "rejected", rateLimitType: "seven_day_sonnet", resetsAt: 1792800000 },
+    } satisfies SDKRateLimitEvent
     const convert = ConvertClaudeStream.make()
     expect(convert(info)).toEqual([])
     expect(convert({ ...assistant(), error: "rate_limit" } as const)).toEqual([])
-    const failed = { ...Recorder.result("text"), subtype: "success", is_error: true, result: "Weekly limit reached." } as const
+    const failed = {
+      ...Recorder.result("text"),
+      subtype: "success",
+      is_error: true,
+      result: "Weekly limit reached.",
+    } as const
     const parts = convert(failed)
     if (parts[0]?.type !== "error") throw new Error("Expected a limit error")
     expect(String(parts[0].error)).toContain(new Date(info.rate_limit_info.resetsAt * 1000).toISOString())
@@ -44,14 +55,26 @@ describe("terminal errors", () => {
   test("empty successes after API retries report the terminal HTTP status", () => {
     for (const status of [500, 529]) {
       const convert = ConvertClaudeStream.make()
-      const result = { ...Recorder.result("text"), subtype: "success", is_error: false, result: "", api_error_status: status } as const
+      const result = {
+        ...Recorder.result("text"),
+        subtype: "success",
+        is_error: false,
+        result: "",
+        api_error_status: status,
+      } as const
       const parts = convert(result)
       if (parts[0]?.type !== "error") throw new Error("Expected an API error")
       expect(String(parts[0].error)).toContain(String(status))
       expect(String(parts[0].error)).toContain("retries")
       expect(parts.some((part) => part.type === "finish")).toBe(false)
     }
-    const empty = { ...Recorder.result("text"), subtype: "success", result: "", is_error: false, api_error_status: null } as const
+    const empty = {
+      ...Recorder.result("text"),
+      subtype: "success",
+      result: "",
+      is_error: false,
+      api_error_status: null,
+    } as const
     expect(ConvertClaudeStream.make()(empty).at(-1)?.type).toBe("finish")
   })
 })

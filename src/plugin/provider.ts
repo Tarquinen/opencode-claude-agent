@@ -1,10 +1,10 @@
 export * as ClaudeProvider from "./provider.js"
 
 import { Model, Provider } from "@opencode/plugin/effect"
-import { define } from "@opencode/plugin/effect/plugin"
-import { Effect, Option, Schema, Scope, Stream, SubscriptionRef } from "effect"
-import { ClaudeStatus } from "../claude/status.js"
+import type { Context } from "@opencode/plugin/effect/plugin"
+import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect"
 import type { ClaudeProbe } from "../claude/probe.js"
+import type { ClaudeStatus } from "../claude/status.js"
 import { SdkPlaceholder } from "../language-model/sdk-placeholder.js"
 
 export const ID = Provider.ID.make("claude-agent")
@@ -26,49 +26,49 @@ const FALLBACK: readonly CatalogModel[] = [
   { id: "haiku", name: "Haiku", efforts: [] },
 ]
 
-export const Plugin = define<Scope.Scope | ClaudeStatus.Service>({
-  id: "claude-agent.provider",
-  effect: Effect.fn("ClaudeProvider.Plugin")(function* (ctx) {
-    const status = yield* ClaudeStatus.Service
-    const saved = Schema.decodeUnknownOption(Catalog)(yield* ctx.storage.get(CATALOG_KEY))
-    let catalog = Option.getOrElse(saved, () => FALLBACK)
+export const register = Effect.fn("ClaudeProvider.register")(function* (ctx: Context, status: ClaudeStatus.Interface) {
+  const saved = Schema.decodeUnknownOption(Catalog)(yield* ctx.storage.get(CATALOG_KEY))
+  let catalog = Option.getOrElse(saved, () => FALLBACK)
 
-    yield* ctx.provider.transform((editor) => {
-      editor.add({
-        info: {
-          id: ID,
-          name: "Claude Agent",
-          activation: "auto",
-          package: `aisdk:${SdkPlaceholder.url}`,
-        },
-        models: catalog.map(toModel),
-      })
+  yield* ctx.provider.transform((editor) => {
+    editor.add({
+      info: {
+        id: ID,
+        name: "Claude Agent",
+        activation: "auto",
+        package: `aisdk:${SdkPlaceholder.url}`,
+      },
+      models: catalog.map(toModel),
     })
+  })
 
-    yield* SubscriptionRef.changes(status.state).pipe(
-      Stream.runForEach((state) =>
-        Effect.gen(function* () {
-          if (state.type !== "ready") return
-          const next = fromClaude(state.probe.models)
-          if (JSON.stringify(next) === JSON.stringify(catalog)) return
-          catalog = next
-          yield* ctx.storage.set(CATALOG_KEY, catalog)
-          yield* ctx.provider.reload()
-        }),
-      ),
-      Effect.forkScoped,
-    )
-  }),
+  yield* SubscriptionRef.changes(status.state).pipe(
+    Stream.runForEach((state) =>
+      Effect.gen(function* () {
+        if (state.type !== "ready") return
+        const next = fromClaude(state.probe.models)
+        if (JSON.stringify(next) === JSON.stringify(catalog)) return
+        catalog = next
+        yield* ctx.storage.set(CATALOG_KEY, catalog)
+        yield* ctx.provider.reload()
+      }),
+    ),
+    Effect.forkScoped,
+  )
 })
 
 function fromClaude(models: readonly ClaudeProbe.Model[]): CatalogModel[] {
-  const catalog: CatalogModel[] = []
-  for (const model of models) {
-    // "default" follows Claude Code's own default, which can change under a running opencode session
-    if (model.value === "default") continue
-    catalog.push({ id: model.value, name: model.displayName, efforts: model.supportedEffortLevels ?? [], contextWindow: model.contextWindow })
-  }
-  return catalog
+  return (
+    models
+      // "default" follows Claude Code's own default, which can change under a running opencode session
+      .filter((model) => model.value !== "default")
+      .map((model) => ({
+        id: model.value,
+        name: model.displayName,
+        efforts: model.supportedEffortLevels ?? [],
+        contextWindow: model.contextWindow,
+      }))
+  )
 }
 
 function toModel(model: CatalogModel): Model.Info {

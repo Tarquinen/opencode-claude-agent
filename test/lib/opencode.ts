@@ -37,7 +37,7 @@ export const start = Effect.fn("TestOpenCode.start")(function* (input: {
     config: { directory, project: false, content: JSON.stringify(input.config ?? {}) },
     models: { fetch: false },
     fs: { filewatcher: false },
-    plugins: [make(input.io, input.registry), ...input.plugins ?? []],
+    plugins: [make(input.io, input.registry), ...(input.plugins ?? [])],
   })
   // Listing models waits for plugins to finish loading
   yield* opencode.model.list()
@@ -54,26 +54,20 @@ export const connect = Effect.fn("TestOpenCode.connect")(function* (opencode: Cl
 
 export const models = Effect.fn("TestOpenCode.models")(function* (opencode: Client) {
   const list = yield* opencode.model.list()
-  const ids: string[] = []
-  for (const model of list.data) {
-    if (model.providerID === ClaudeProvider.ID) ids.push(String(model.id))
-  }
-  return ids
+  return list.data.filter((model) => model.providerID === ClaudeProvider.ID).map((model) => String(model.id))
 })
 
 // Our active connection, including any problem the plugin reported on it
 export const connection = Effect.fn("TestOpenCode.connection")(function* (opencode: Client) {
   const list = yield* opencode.integration.list()
-  for (const integration of list.data) {
-    if (String(integration.id) === ClaudeProvider.ID) return integration.connections[0]
-  }
-  return undefined
+  return list.data.find((integration) => String(integration.id) === ClaudeProvider.ID)?.connections[0]
 })
 
 // The plugin updates opencode in the background, so tests check again until opencode shows the change
-export function waitUntil<A, E>(read: Effect.Effect<A, E>, done: (value: A) => boolean, timeout: Duration.Input = "5 seconds") {
-  return read.pipe(
-    Effect.repeat({ until: done, schedule: Schedule.spaced("10 millis") }),
-    Effect.timeout(timeout),
-  )
+export function waitUntil<A, E>(
+  read: Effect.Effect<A, E>,
+  done: (value: A) => boolean,
+  timeout: Duration.Input = "5 seconds",
+) {
+  return read.pipe(Effect.repeat({ until: done, schedule: Schedule.spaced("10 millis") }), Effect.timeout(timeout))
 }

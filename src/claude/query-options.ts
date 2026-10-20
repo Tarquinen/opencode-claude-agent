@@ -75,7 +75,10 @@ export function session(input: {
     options.env = { ...options.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(input.maxOutputTokens) }
   }
   if (input.tools.length > 0) options.mcpServers = { opencode: ToolServer.make(input.tools, input.pending) }
-  if (input.resume !== undefined) options.resume = input.resume
-  else options.sessionId = crypto.randomUUID()
+  if (input.resume !== undefined) {
+    options.resume = input.resume
+    return options
+  }
+  options.sessionId = crypto.randomUUID()
   return options
 }

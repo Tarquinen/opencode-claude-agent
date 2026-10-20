@@ -12,7 +12,8 @@ import { Recorder } from "../lib/recorder.js"
 
 // Needs a real, logged-in `claude`. Run with `bun run test:live`, or `RECORD=1 bun run test:live` to save new
 // recordings. `claude auth status` exits with 1 when logged out.
-const live = !process.env.CI && process.env.CLAUDE_LIVE === "1" && Bun.spawnSync(["claude", "auth", "status"]).exitCode === 0
+const live =
+  !process.env.CI && process.env.CLAUDE_LIVE === "1" && Bun.spawnSync(["claude", "auth", "status"]).exitCode === 0
 
 // The probe gives `claude` 30 seconds to start and 30 more for context discovery. Waiting longer lets a stuck
 // probe report its own error before the test times out.
@@ -61,7 +62,10 @@ describe.skipIf(!live)("start-up against the real claude", () => {
     "the login check honors claude's 1M context opt-out",
     () =>
       Effect.gen(function* () {
-        const result = yield* probe({ ...ClaudeIO.real, env: () => ({ ...process.env, CLAUDE_CODE_DISABLE_1M_CONTEXT: "1" }) })
+        const result = yield* probe({
+          ...ClaudeIO.real,
+          env: () => ({ ...process.env, CLAUDE_CODE_DISABLE_1M_CONTEXT: "1" }),
+        })
         for (const model of result.models) {
           if (model.value !== "default") expect(model.contextWindow).toBe(200_000)
         }
@@ -87,8 +91,9 @@ describe.skipIf(!live)("start-up against the real claude", () => {
         yield* TestOpenCode.connect(test.opencode)
 
         // The built-in list only has aliases, so full model IDs mean claude's own list has arrived
-        const ids = yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) =>
-          ids.some((id) => id.startsWith("claude-")),
+        const ids = yield* TestOpenCode.waitUntil(
+          TestOpenCode.models(test.opencode),
+          (ids) => ids.some((id) => id.startsWith("claude-")),
           PROBE_WAIT,
         )
         expect(ids).toContain("sonnet")

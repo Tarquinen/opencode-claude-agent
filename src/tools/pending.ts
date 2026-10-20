@@ -15,11 +15,9 @@ export function make() {
   let next: string | undefined
 
   function expect(id: string, name: string) {
-    let call = calls.get(id)
-    if (!call) {
-      call = { name, result: Promise.withResolvers<ToolResult.Result>() }
-      calls.set(id, call)
-    }
+    const saved = calls.get(id)
+    const call = saved ?? { name, result: Promise.withResolvers<ToolResult.Result>() }
+    if (!saved) calls.set(id, call)
     if (call.name !== name) throw new Error(`Mismatched Claude tool call ${id}`)
     return call
   }

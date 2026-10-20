@@ -27,7 +27,10 @@ describe("recording privacy", () => {
       expect(Recorder.parse(JSON.stringify(input))).toEqual({ type, message: { content: [text] } })
       expect(input.message.content).toHaveLength(4)
     }
-    const event = { type: "stream_event", event: { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "Visible answer" } } }
+    const event = {
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "Visible answer" } },
+    }
     expect(Recorder.parse(JSON.stringify(event))).toEqual(event)
   })
 

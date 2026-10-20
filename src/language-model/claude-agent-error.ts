@@ -14,33 +14,23 @@ export function make() {
     if (message.type === "assistant" && message.parent_tool_use_id === null && message.error) code = message.error
     if (message.type !== "result") return
 
-    let text: string
-    let status: number | undefined
-    if (message.subtype === "success") {
-      status = message.api_error_status ?? undefined
-      const httpError = status !== undefined && status >= 400
-      if (!message.is_error && !httpError) return
-      text = message.result
-    } else {
-      text = message.errors.join("\n")
-    }
-
-    if (status !== undefined && status >= 500) {
-      if (status === 529) text = "Anthropic is overloaded (529)."
-      else text = `Anthropic returned HTTP ${status}.`
-      text += " Claude Code exhausted its retries. Try again shortly."
-    }
-    if (code === "rate_limit" || (rejected && status === 429)) {
-      if (!text) {
-        text = "Claude Code subscription limit reached"
-        const window = rejected?.rateLimitType?.replaceAll("_", " ")
-        if (window) text += ` (${window})`
-        text += "."
-      }
-      if (rejected?.resetsAt) text += ` Resets at ${new Date(rejected.resetsAt * 1000).toISOString()}.`
-    }
-    if (code === "billing_error") text += " Check your Claude plan and extra-usage settings."
-    if (code === "authentication_failed") text += " Run `claude auth login` in a terminal."
+    const status = message.subtype === "success" ? (message.api_error_status ?? undefined) : undefined
+    const httpError = status !== undefined && status >= 400
+    if (message.subtype === "success" && !message.is_error && !httpError) return
+    const result = message.subtype === "success" ? message.result : message.errors.join("\n")
+    const failure =
+      status !== undefined && status >= 500
+        ? (status === 529 ? "Anthropic is overloaded (529)." : `Anthropic returned HTTP ${status}.`) +
+          " Claude Code exhausted its retries. Try again shortly."
+        : result
+    const limited = code === "rate_limit" || (rejected && status === 429)
+    const window = rejected?.rateLimitType?.replaceAll("_", " ")
+    const limit =
+      limited && !failure ? `Claude Code subscription limit reached${window ? ` (${window})` : ""}.` : failure
+    const reset = limited && rejected?.resetsAt ? ` Resets at ${new Date(rejected.resetsAt * 1000).toISOString()}.` : ""
+    const billing = code === "billing_error" ? " Check your Claude plan and extra-usage settings." : ""
+    const auth = code === "authentication_failed" ? " Run `claude auth login` in a terminal." : ""
+    const text = limit + reset + billing + auth
 
     if (text) return new Error(text)
     if (status) return new Error(`Claude Code could not finish its reply (HTTP ${status})`)

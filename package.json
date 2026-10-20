@@ -1,33 +1,43 @@
 {
-  "name": "opencode-claude-agent",
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@opencode/plugin-claude-agent",
   "version": "0.0.0",
   "private": true,
   "description": "Experimental opencode plugin that runs Claude Code models through the Claude Agent SDK",
   "type": "module",
   "exports": {
+    ".": "./src/index.ts",
     "./server": "./src/index.ts"
   },
   "scripts": {
+    "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:live": "CLAUDE_LIVE=1 bun test test/live",
-    "typecheck": "tsgo --noEmit"
+    "format": "prettier --write ."
   },
   "dependencies": {
     "@ai-sdk/provider": "3.0.8",
     "@anthropic-ai/claude-agent-sdk": "0.3.301",
-    "@anthropic-ai/sdk": "0.135.0",
     "@modelcontextprotocol/sdk": "1.32.1",
-    "zod": "4.6.7"
+    "which": "6.0.1"
   },
   "peerDependencies": {
-    "@opencode/plugin": "2.0.31",
-    "effect": "4.0.1"
+    "@opencode/plugin": "^2.0.31 || ^0.0.0-dev",
+    "effect": "^4.0.0"
   },
   "devDependencies": {
-    "@opencode/plugin": "2.0.31",
-    "@opencode/sdk": "2.0.31",
-    "@types/bun": "1.4.3",
-    "@typescript/native-preview": "7.0.0-dev.20260707.2",
-    "effect": "4.0.1"
+    "@opencode/plugin": "2.0.32",
+    "@opencode/sdk": "2.0.32",
+    "@tsconfig/bun": "1.0.9",
+    "@types/bun": "1.4.0",
+    "@types/which": "3.0.4",
+    "@typescript/native": "npm:typescript@7.0.2",
+    "effect": "4.0.1",
+    "prettier": "3.6.2",
+    "zod": "4.1.8"
+  },
+  "prettier": {
+    "semi": false,
+    "printWidth": 120
   }
 }

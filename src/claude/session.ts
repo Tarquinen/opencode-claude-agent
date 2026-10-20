@@ -1,6 +1,12 @@
 export * as ClaudeSession from "./session.js"
 
-import { query, type Options, type SDKMessage, type SDKResultMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
+import {
+  query,
+  type Options,
+  type SDKMessage,
+  type SDKResultMessage,
+  type SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk"
 import { ClaudeProbe } from "./probe.js"
 
 interface Turn {
@@ -14,7 +20,11 @@ export type Interface = ReturnType<typeof start>
 
 export function start(options: Options) {
   let input!: ReadableStreamDefaultController<SDKUserMessage>
-  const prompt = new ReadableStream<SDKUserMessage>({ start(controller) { input = controller } })
+  const prompt = new ReadableStream<SDKUserMessage>({
+    start(controller) {
+      input = controller
+    },
+  })
   const session = query({ prompt, options })
   let turn: Turn | undefined
   let initialized = false
@@ -98,7 +108,9 @@ export function start(options: Options) {
       const message = active.messages.shift()
       if (!message) {
         if (ended) throw failure ?? new Error("Claude Code stopped before finishing its reply")
-        await new Promise<void>((resolve) => { active.wake = resolve })
+        await new Promise<void>((resolve) => {
+          active.wake = resolve
+        })
         continue
       }
       emit(message)
@@ -107,7 +119,8 @@ export function start(options: Options) {
           if (part.type === "tool_use") calledTools = true
         }
       }
-      const replyEnded = message.type === "stream_event" && message.parent_tool_use_id === null && message.event.type === "message_stop"
+      const replyEnded =
+        message.type === "stream_event" && message.parent_tool_use_id === null && message.event.type === "message_stop"
       if (calledTools && replyEnded) return "tools"
       if (message.type === "result") return message
     }
@@ -116,13 +129,25 @@ export function start(options: Options) {
   return {
     id: options.resume ?? options.sessionId!,
     ready,
-    get ended() { return ended },
-    get persisted() { return persisted },
-    get running() { return !!turn && !turn.finished },
+    get ended() {
+      return ended
+    },
+    get persisted() {
+      return persisted
+    },
+    get running() {
+      return !!turn && !turn.finished
+    },
     begin,
     readStep,
     addUser(content: SDKUserMessage["message"]["content"], uuid: NonNullable<SDKUserMessage["uuid"]>) {
-      input.enqueue({ type: "user", uuid, priority: "next", message: { role: "user", content }, parent_tool_use_id: null })
+      input.enqueue({
+        type: "user",
+        uuid,
+        priority: "next",
+        message: { role: "user", content },
+        parent_tool_use_id: null,
+      })
     },
     interrupt,
     stop,

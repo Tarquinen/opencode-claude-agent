@@ -1,30 +1,26 @@
 export * as ClaudeAISDK from "./aisdk.js"
 
-import { define } from "@opencode/plugin/effect/plugin"
-import { Effect, Scope } from "effect"
-import { ClaudeSessions } from "../claude/sessions.js"
+import type { Context } from "@opencode/plugin/effect/plugin"
+import { Effect } from "effect"
+import type { ClaudeSessions } from "../claude/sessions.js"
 import { ClaudeAgentLanguageModel } from "../language-model/claude-agent-language-model.js"
 import { ClaudeProvider } from "./provider.js"
 
-export const Plugin = define<Scope.Scope | ClaudeSessions.Service>({
-  id: "claude-agent.aisdk",
-  effect: Effect.fn("ClaudeAISDK.Plugin")(function* (ctx) {
-    const sessions = yield* ClaudeSessions.Service
-    const context = yield* Effect.context<never>()
-    const run = Effect.runPromiseWith(context)
-    const dependencies: ClaudeAgentLanguageModel.Dependencies = {
-      run: (request, signal) => run(sessions.run(request), { signal }),
-    }
-    yield* ctx.aisdk.hook(
-      "sdk",
-      (evt) =>
-        Effect.sync(() => {
-          // Always replace: until the opencode fix ships, the npm fallback has already set the placeholder here
-          evt.sdk = {
-            languageModel: (modelID: string) => new ClaudeAgentLanguageModel.Model(modelID, dependencies),
-          }
-        }),
-      { providerID: ClaudeProvider.ID },
-    )
-  }),
+export const register = Effect.fn("ClaudeAISDK.register")(function* (ctx: Context, sessions: ClaudeSessions.Interface) {
+  const context = yield* Effect.context<never>()
+  const run = Effect.runPromiseWith(context)
+  const dependencies: ClaudeAgentLanguageModel.Dependencies = {
+    run: (request, signal) => run(sessions.run(request), { signal }),
+  }
+  yield* ctx.aisdk.hook(
+    "sdk",
+    (evt) =>
+      Effect.sync(() => {
+        // Always replace: until the opencode fix ships, the npm fallback has already set the placeholder here
+        evt.sdk = {
+          languageModel: (modelID: string) => new ClaudeAgentLanguageModel.Model(modelID, dependencies),
+        }
+      }),
+    { providerID: ClaudeProvider.ID },
+  )
 })

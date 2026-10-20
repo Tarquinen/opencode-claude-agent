@@ -12,11 +12,14 @@ import { ClaudeSystemPrompt } from "../../src/language-model/system-prompt.js"
 import { TestSessions } from "../lib/sessions.js"
 
 // Separate opt-in: compatibility experiments, not part of the usual live regression suite.
-const live = !process.env.CI && process.env.CLAUDE_PROMPT_MATRIX === "1"
-  && Bun.spawnSync(["claude", "auth", "status"]).exitCode === 0
+const live =
+  !process.env.CI &&
+  process.env.CLAUDE_PROMPT_MATRIX === "1" &&
+  Bun.spawnSync(["claude", "auth", "status"]).exitCode === 0
 
 const runtime = ClaudeSystemPrompt.primary.append
-const routing = "Built-in Claude Code tools are disabled. Use only the mcp__opencode__* tools provided for this turn; they execute via OpenCode. Batch independent tool calls into a single turn instead of calling them one at a time."
+const routing =
+  "Built-in Claude Code tools are disabled. Use only the mcp__opencode__* tools provided for this turn; they execute via OpenCode. Batch independent tool calls into a single turn instead of calling them one at a time."
 const catalog = `# Code Mode
 Use the \`execute\` tool to call the tools listed below. They cannot be called directly. They only work inside code you pass to \`execute\`.
 The catalog is complete. Do not guess tool names.
@@ -39,7 +42,8 @@ The user may also invoke a skill directly. When that happens, its instructions a
   <skill><id>review</id><name>Review</name><description>Review code for correctness and maintainability when the user requests a code review.</description></skill>
 </available_skills>
 The skill tool above is mcp__opencode__skill.`
-const role = "# Agent role (from the agent configuration in OpenCode)\nYou are a careful code reviewer. Focus on realistic correctness bugs and explain them concisely."
+const role =
+  "# Agent role (from the agent configuration in OpenCode)\nYou are a careful code reviewer. Focus on realistic correctness bugs and explain them concisely."
 const agents = `# Project instructions (loaded by OpenCode)
 Instructions from: AGENTS.md
 Prefer plain language and simple procedural code. Keep changes focused. Run bun test and bun run typecheck after editing code.`
@@ -52,7 +56,8 @@ describe.skipIf(!live)("system prompt compatibility", () => {
     const directory = await mkdtemp("/tmp/opencode/prompt-matrix-")
     const opencode = readFileSync(new URL("../fixtures/opencode-system.txt", import.meta.url), "utf8")
     const full = [runtime, routing, catalog, mcp, skills, role, agents].join("\n\n")
-    const cases: { name: string; system: NonNullable<Options["systemPrompt"]>; tools?: boolean; control?: boolean }[] = []
+    const cases: { name: string; system: NonNullable<Options["systemPrompt"]>; tools?: boolean; control?: boolean }[] =
+      []
     function preset(name: string, append: string, tools = false) {
       cases.push({ name, system: { type: "preset", preset: "claude_code", append }, tools })
     }
@@ -62,9 +67,18 @@ describe.skipIf(!live)("system prompt compatibility", () => {
     preset("phase4", [runtime, routing, catalog, mcp, skills].join("\n\n"))
     preset("phase6", [runtime, role, agents].join("\n\n"))
     preset("combined", full)
-    preset("large-project-instructions", full + "\n\n# Project architecture reference\n\n" + readFileSync(new URL("../../PLAN.md", import.meta.url), "utf8"))
+    preset(
+      "large-project-instructions",
+      full +
+        "\n\n# Project architecture reference\n\n" +
+        readFileSync(new URL("../../PLAN.md", import.meta.url), "utf8"),
+    )
     cases.push({ name: "opencode-replacement", system: opencode, control: true })
-    cases.push({ name: "opencode-append", system: { type: "preset", preset: "claude_code", append: runtime + "\n\n" + opencode }, control: true })
+    cases.push({
+      name: "opencode-append",
+      system: { type: "preset", preset: "claude_code", append: runtime + "\n\n" + opencode },
+      control: true,
+    })
     cases.push({ name: "short-custom", system: "You are a concise test assistant.", control: true })
     preset("combined-with-tools", full, true)
     preset("combined-repeat", full)
@@ -79,27 +93,50 @@ describe.skipIf(!live)("system prompt compatibility", () => {
         }
         // Fixture tools return text only. This checks SDK tool registration and prompt compatibility,
         // not the OpenCode tool bridge.
-        const server = item.tools ? createSdkMcpServer({ name: "opencode", tools: [
-          tool("read", "Read a fixture file.", { path: z.string() }, reply),
-          tool("execute", "Execute a Code Mode query against the fixture project.", { code: z.string() }, reply),
-          tool("skill", "Load a fixture skill.", { id: z.string() }, reply),
-        ] }) : undefined
+        const server = item.tools
+          ? createSdkMcpServer({
+              name: "opencode",
+              tools: [
+                tool("read", "Read a fixture file.", { path: z.string() }, reply),
+                tool("execute", "Execute a Code Mode query against the fixture project.", { code: z.string() }, reply),
+                tool("skill", "Load a fixture skill.", { id: z.string() }, reply),
+              ],
+            })
+          : undefined
         const session = ClaudeSession.start({
-          ...base, cwd: directory, model: "haiku", systemPrompt: item.system,
-          includePartialMessages: true, persistSession: false, sessionId: crypto.randomUUID(),
+          ...base,
+          cwd: directory,
+          model: "haiku",
+          systemPrompt: item.system,
+          includePartialMessages: true,
+          persistSession: false,
+          sessionId: crypto.randomUUID(),
           ...(server ? { mcpServers: { opencode: server } } : {}),
         })
-        const timer = setTimeout(() => { void session.stop() }, 30_000)
+        const timer = setTimeout(() => {
+          void session.stop()
+        }, 30_000)
         try {
           await session.ready
           const prompt = item.tools
             ? "Use the read tool to read marker.txt, then reply only with the marker it returns."
             : "Reply only with the marker COPPER-OTTER. Do not use tools."
           const result = await TestSessions.send(session, prompt)
-          const passed = result.subtype === "success" && !result.is_error && result.result.includes("COPPER-OTTER")
-            && (!item.tools || toolCalls > 0)
-          console.log(JSON.stringify({ name: item.name, version: probe.version, characters: JSON.stringify(item.system).length,
-            passed, toolCalls, result: result.subtype === "success" ? result.result : result.errors }))
+          const passed =
+            result.subtype === "success" &&
+            !result.is_error &&
+            result.result.includes("COPPER-OTTER") &&
+            (!item.tools || toolCalls > 0)
+          console.log(
+            JSON.stringify({
+              name: item.name,
+              version: probe.version,
+              characters: JSON.stringify(item.system).length,
+              passed,
+              toolCalls,
+              result: result.subtype === "success" ? result.result : result.errors,
+            }),
+          )
           if (!passed && !item.control) failures.push(item.name)
         } catch (error) {
           console.log(JSON.stringify({ name: item.name, error: String(error) }))

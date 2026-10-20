@@ -1,6 +1,7 @@
 export * as ClaudeIO from "./io.js"
 
 import { deleteSession, getSessionInfo, type Options } from "@anthropic-ai/claude-agent-sdk"
+import whichPkg from "which"
 import { ClaudeFork } from "./fork.js"
 
 // Everything that reaches outside opencode. Tests swap it for a fake `claude`.
@@ -16,7 +17,7 @@ export interface Interface {
 }
 
 export const real: Interface = {
-  which: () => Bun.which(process.platform === "win32" ? "claude.exe" : "claude") ?? undefined,
+  which: () => whichPkg.sync("claude", { nothrow: true }) ?? undefined,
   env: () => process.env,
   sessionExists: async (sessionID) => (await getSessionInfo(sessionID)) !== undefined,
   fork: ClaudeFork.create,

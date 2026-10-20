@@ -74,7 +74,7 @@ Claude thinks and opencode acts. Claude Code's built-in tools are off, and openc
 ### How the plugin plugs into opencode
 
 1. **Register a "Claude Agent" provider and its models** with `ctx.provider.transform` (`packages/plugin/src/effect/provider.ts`). The stable provider ID is `claude-agent`. The provider's package points at a placeholder file inside the plugin (see "Provider loading"). Models are registered right away from the last saved model list, or a built-in list on first run. The login check runs in the background and updates the list with `ctx.provider.reload()`, so opencode never waits on it at startup.
-2. **Connect through `/connect`** in opencode's provider list. `ctx.integration.transform` adds an `external` login method, "Use existing Claude Code login (`claude auth login`)", the same way Google Vertex offers gcloud login (`packages/core/src/plugin/provider/google-vertex.ts:116-130`). opencode stores only which method was chosen, never a token (`packages/core/src/integration.ts:766-790`). There is no separate setup command. Installation and sign-in remain in the official CLI: the current public connection API has no interactive-terminal handoff, and its command-login method closes stdin and stores stdout as a key. Automatic CLI setup from `/connect` remains unresolved; this plugin does not introduce an OAuth relay or placeholder OAuth tokens.
+2. **Connect through `/connect`** in opencode's provider list. `ctx.integration.transform` adds an `external` login method, "Claude Code login (claude auth login)", the same way Google Vertex offers gcloud login (`packages/core/src/plugin/provider/google-vertex.ts:116-130`). opencode stores only which method was chosen, never a token (`packages/core/src/integration.ts:766-790`). There is no separate setup command. Installation and sign-in remain in the official CLI: the current public connection API has no interactive-terminal handoff, and its command-login method closes stdin and stores stdout as a key. Automatic CLI setup from `/connect` remains unresolved; this plugin does not introduce an OAuth relay or placeholder OAuth tokens.
 3. **Supply our own model** through the `aisdk` `sdk` hook (`packages/plugin/src/effect/aisdk.ts`), the way GitHub Copilot does (`packages/core/src/plugin/provider/github-copilot.ts:264-276`). We return an AI SDK `LanguageModelV3` whose `doStream` drives the Claude SDK instead of making an HTTP call. opencode converts its events into its own (`streamPartEvents` in `packages/core/src/aisdk.ts`).
 4. **Know which session a call belongs to, and what kind of call it is.** opencode sends an `x-opencode-session-id` header with every model call, including titles, compaction and generate (`packages/core/src/session/model-request.ts:279-320`), and the bridge passes headers through to `doStream` (`aisdk.ts:492-513`). Our `ctx.session.hook("model.request")`, limited to our provider, adds the call's kind (primary, compaction, title or generate) as another header, and for a native fork, the session it was forked from.
 5. **Remember state** with `ctx.storage`: which Claude session belongs to each opencode session, and what Claude has already seen.
@@ -83,7 +83,7 @@ Conversation content and tools come from the final request our model receives, a
 
 ### Provider loading
 
-opencode loads a model's code through plugin `sdk` hooks, run in order. A built-in fallback that installs packages from npm runs before any plugin from config, so a made-up package name like `aisdk:opencode-claude-agent` fails with an npm error before our hook runs. This is open issue [#42788](https://github.com/anomalyco/opencode/issues/42788). The full write-up and the upstream fix are in [OPENCODE-FIX.md](OPENCODE-FIX.md).
+opencode loads a model's code through plugin `sdk` hooks, run in order. A built-in fallback that installs packages from npm runs before any plugin from config, so a made-up package name like `aisdk:@opencode/plugin-claude-agent` fails with an npm error before our hook runs. This is open issue [#42788](https://github.com/anomalyco/opencode/issues/42788). The full write-up and the upstream fix are in [OPENCODE-FIX.md](OPENCODE-FIX.md).
 
 Until the fix ships, the package is an absolute `file://` path to a small placeholder file in the plugin (`language-model/sdk-placeholder.ts`), worked out from `import.meta.url` when the plugin starts. The fallback imports local files directly instead of installing them, calls the file's `create...` export, and our own `sdk` hook then replaces that with the real SDK. Rules for our hook: match on our provider ID, and always replace `evt.sdk`; don't skip when it's already set.
 
@@ -329,14 +329,14 @@ These opencode features won't work with Claude Code models:
 
 The layout follows two opencode patterns:
 
-- **Built-in plugins** (`packages/core/src/plugin/provider/github-copilot.ts`, `plugin/websearch/*.ts`). Each file is one small `define({ id, effect })` that hooks into one opencode area, with plain helper modules beside it.
+- **`packages/plugin-browser`**. A separate package with one `define({ id, effect })` in its entry point, which calls a `register(ctx, ...)` function from each feature module (`BrowserTools.register(ctx, connection)`). Running another definition's `effect` would not give it its own ID or storage, so features are plain functions rather than nested plugins.
 - **`packages/core/src/github-copilot/`**. The custom AI SDK model has its own folder, separate from the plugin wiring.
 
-opencode loads one default plugin per package (`packages/core/src/plugin/module.ts:125-134`). `index.ts` is that plugin, and it runs a list of feature plugins, the same way `plugin/websearch/index.ts` lists its providers.
+opencode loads one default plugin per package (`packages/core/src/plugin/module.ts:125-134`). `index.ts` is that plugin, with ID `opencode.claude-agent` (built-ins use `opencode.<name>`, like `opencode.browser` and `opencode.figma`). It calls each feature's `register` in turn.
 
 ```
-opencode-claude-agent/
-├── package.json            exports "./server" → src/index.ts
+plugin-claude-agent/
+├── package.json            exports "." and "./server" → src/index.ts
 ├── server.ts               Re-exports src/index.ts, for loading from a local folder
 ├── README.md
 ├── PLAN.md
@@ -401,35 +401,28 @@ opencode-claude-agent/
 2. **Only `claude/` loads the Claude SDK at runtime.** Every other file uses only its types. The SDK changes often, so most breakages stay in one folder. `tools/server.ts` is likewise the only runtime user of the MCP SDK.
 3. **`sync/` (except `record.ts`), the converters, `tools/names.ts` and `tools/result.ts` are plain functions.** They use no services and start no processes, so they are tested quickly with Claude messages taken from recordings and no mocks.
 4. **Each file has one job**, and its name says what it is.
-5. **Same style as opencode.** Modules start with the self-export (`export * as ClaudeProvider from "./provider.js"`). Each feature exports `Plugin = define({ id: "claude-agent.provider", effect: Effect.fn("ClaudeProvider.Plugin")(...) })`, with small helpers below it. opencode's style guide applies.
+5. **Same style as opencode.** Modules start with the self-export (`export * as ClaudeProvider from "./provider.js"`). Each feature exports `register = Effect.fn("ClaudeProvider.register")(function* (ctx, ...) {...})`, with small helpers below it. opencode's style guide (root `AGENTS.md`) applies, and prettier formats with `semi: false, printWidth: 120`. Code that would ship in core avoids Bun-only APIs, because opencode also builds for Node: `which` finds `claude`, as `packages/core/src/util/which.ts` does.
 
 ### The entry point
 
 ```ts
-const features = [
-  ClaudeProvider.Plugin,
-  ClaudeIntegration.Plugin,
-  ClaudeAISDK.Plugin,
-  ClaudeSessionHooks.Plugin,
-  ClaudeInstructions.Plugin,
-]
+export const ID = "opencode.claude-agent"
 
 // Tests pass a fake ClaudeIO here, because config options can't hold functions.
 // The registry lives outside setup's scope, so a reload can adopt its processes.
 // Restart tests pass their own and close it, as an exiting opencode would.
 export const make = (io: ClaudeIO.Interface, registry = ClaudeSessions.registry()) =>
   define({
-    id: "claude-agent",
+    id: ID,
     effect: Effect.fn("ClaudeAgent.Plugin")(function* (ctx) {
       const options = yield* ClaudeAgentOptions.decode(ctx.options).pipe(Effect.orDie)
       const status = yield* ClaudeStatus.make({ options, io })
       const sessions = yield* registry.attach({ options, io, storage: ctx.storage, directory: ctx.location.directory })
-      for (const feature of features) {
-        yield* feature.effect(ctx).pipe(
-          Effect.provideService(ClaudeStatus.Service, status),
-          Effect.provideService(ClaudeSessions.Service, sessions),
-        )
-      }
+      yield* ClaudeProvider.register(ctx, status)
+      yield* ClaudeIntegration.register(ctx, status)
+      yield* ClaudeAISDK.register(ctx, sessions)
+      yield* ClaudeSessionHooks.register(ctx)
+      yield* ClaudeInstructions.register(ctx)
       yield* status.refresh().pipe(Effect.forkScoped)
     }),
   })
@@ -451,7 +444,7 @@ export default make(ClaudeIO.real)
 
 | Change | Where |
 |---|---|
-| A new opencode hook we need | New file in `plugin/`, added to the list in `index.ts` |
+| A new opencode hook we need | New file in `plugin/` exporting `register`, called from `index.ts` |
 | Another Claude Code feature to turn off | `claude/query-options.ts` |
 | A new attachment type | `convert-to-claude-message.ts` |
 | A new kind of history change | `sync/decide.ts`, plus a test |
@@ -461,15 +454,18 @@ export default make(ClaudeIO.real)
 
 ### Dependencies and loading
 
-- `@anthropic-ai/claude-agent-sdk`, pinned to an exact version.
-- `@anthropic-ai/sdk`, for the message content block types.
-- `@modelcontextprotocol/sdk`, for the MCP server built from JSON Schemas.
-- `@ai-sdk/provider`, for the `LanguageModelV3` types.
-- `@opencode/plugin` (published on npm) and `effect`, pinned to the version opencode uses, as peer and dev dependencies. opencode supplies its own copies at runtime (`packages/plugin/src/runtime.ts:17-33`).
-- `@opencode/sdk` (published on npm), the same version as `@opencode/plugin`, as a dev dependency for running opencode inside tests.
-- We always pass the user's `claude` binary, so the SDK's bundled binary (about 268 MB of optional dependencies) is unused, and installs can skip optional dependencies.
+Versions are pinned exactly, matching opencode's catalog where opencode uses the same package.
 
-During development, opencode's config points at the plugin folder: `"plugins": ["/home/dan/src/opencode-claude-code"]`, or `{ "package": "...", "options": {...} }` to pass options. For a local folder, opencode ignores `package.json` and looks for a root `server.ts` or `index.ts` (`packages/plugin/src/host.ts:17-43`), so the root `server.ts` re-exports `src/index.ts`.
+- `@anthropic-ai/claude-agent-sdk`, the library that starts `claude` and speaks its protocol. Its peers `@anthropic-ai/sdk` and `zod` install automatically; message block types come through the SDK's own types, so we don't import `@anthropic-ai/sdk` directly. `zod` (opencode's 4.1.8) is a dev dependency, for one live test.
+- `@modelcontextprotocol/sdk` 1.x, for the MCP server built from JSON Schemas. opencode core uses the 2.0 split packages, but the Agent SDK requires 1.x.
+- `@ai-sdk/provider` 3.0.8, for the `LanguageModelV3` types, as in opencode.
+- `which` 6.0.1, to find `claude`, as in opencode core.
+- `@opencode/plugin` and `effect` as peer dependencies with ranges (`^2.0.31 || ^0.0.0-dev`, `^4.0.0`), and exact dev dependencies. opencode supplies its own copies at runtime (`packages/plugin/src/runtime.ts:17-33`), and plugins must never bundle `effect`.
+- `@opencode/sdk` (published on npm), the same version as `@opencode/plugin`, as a dev dependency for running opencode inside tests.
+- Tooling matches opencode: `tsc` from `@typescript/native` (`npm:typescript@7.0.2`), `tsconfig.json` extending `@tsconfig/bun`, `@types/bun` 1.4.0 and prettier 3.6.2.
+- We always pass the user's `claude` binary, so the SDK's bundled Claude Code binary is never run. It is an optional dependency of about 250 MB per platform that npm and Bun still download. Skipping optional dependencies isn't an option here, because TypeScript 7 ships its compiler the same way. Once built in, opencode compiles to one executable that includes only the SDK's JavaScript, so the binary would not ship.
+
+During development, opencode's config points at the plugin folder: `"plugins": ["/home/dan/src/opencode-claude-agent"]`, or `{ "package": "...", "options": {...} }` to pass options. For a local folder, opencode ignores `package.json` and looks for a root `server.ts` or `index.ts` (`packages/plugin/src/host.ts:17-43`), so the root `server.ts` re-exports `src/index.ts`.
 
 ## Implementation process
 

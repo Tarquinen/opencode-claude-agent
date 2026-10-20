@@ -27,7 +27,8 @@ export function make(name: string, capture = false) {
   const spawnClaude: NonNullable<Options["spawnClaudeCodeProcess"]> = (options) => {
     const process = nextProcess++
     lines.push({ from: "spawn", process, args: options.args })
-    for (const arg of options.args) if (arg.startsWith("--session-id=") || arg.startsWith("--resume=")) sessionIDs.add(arg.split("=")[1]!)
+    for (const arg of options.args)
+      if (arg.startsWith("--session-id=") || arg.startsWith("--resume=")) sessionIDs.add(arg.split("=")[1]!)
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
       env: options.env,
@@ -56,15 +57,14 @@ export function make(name: string, capture = false) {
       sdk: sdkVersion(),
       date: new Date().toISOString().slice(0, 10),
     }
-    let text = ""
-    for (const line of [header, ...lines]) {
-      text += JSON.stringify(line) + "\n"
-    }
+    const text = [header, ...lines].map((line) => JSON.stringify(line) + "\n").join("")
     // Personal details stay out of the repository
-    text = text.replaceAll(homedir(), "/home/user")
-    if (startup?.account?.email) text = text.replaceAll(startup.account.email, "user@example.com")
-    if (startup?.account?.organization) text = text.replaceAll(startup.account.organization, "Example Org")
-    writeFileSync(path.join(DIRECTORY, `${name}.jsonl`), text)
+    const home = text.replaceAll(homedir(), "/home/user")
+    const email = startup?.account?.email ? home.replaceAll(startup.account.email, "user@example.com") : home
+    const organization = startup?.account?.organization
+      ? email.replaceAll(startup.account.organization, "Example Org")
+      : email
+    writeFileSync(path.join(DIRECTORY, `${name}.jsonl`), organization)
   }
 
   return { spawn: enabled || capture ? spawnClaude : undefined, save, sessionIDs, lines: lines as readonly Line[] }
@@ -74,13 +74,21 @@ export function make(name: string, capture = false) {
 export function parse(line: string) {
   return JSON.parse(line, (_key, value) => {
     if (!value || typeof value !== "object") return value
-    if (Array.isArray(value)) {
-      const items = []
-      for (const item of value) if (item !== undefined) items.push(item)
-      return items
-    }
-    if (value.type === "thinking" || value.type === "thinking_delta" || value.type === "redacted_thinking" || value.type === "signature_delta") return undefined
-    if (value.type === "reasoning" || value.type === "reasoning-start" || value.type === "reasoning-delta" || value.type === "reasoning-end") return undefined
+    if (Array.isArray(value)) return value.filter((item) => item !== undefined)
+    if (
+      value.type === "thinking" ||
+      value.type === "thinking_delta" ||
+      value.type === "redacted_thinking" ||
+      value.type === "signature_delta"
+    )
+      return undefined
+    if (
+      value.type === "reasoning" ||
+      value.type === "reasoning-start" ||
+      value.type === "reasoning-delta" ||
+      value.type === "reasoning-end"
+    )
+      return undefined
     if (value.type === "content_block_start" && value.content_block === undefined) return undefined
     if (value.type === "content_block_delta" && value.delta === undefined) return undefined
     if (value.type === "stream_event" && value.event === undefined) return undefined
@@ -89,29 +97,25 @@ export function parse(line: string) {
 }
 
 // What `claude` answered to the SDK's first start-up request
-export function startupReply(lines: readonly Line[]): any {
-  for (const line of lines) {
-    if (line.from === "claude" && line.message.type === "control_response") return line.message.response.response
-  }
-  return undefined
+export function startupReply(lines: readonly Line[]) {
+  const line = lines.find((line) => line.from === "claude" && line.message.type === "control_response")
+  return line?.from === "claude" ? line.message.response.response : undefined
 }
 
 export function load(name: string): Line[] {
   const text = readFileSync(path.join(DIRECTORY, `${name}.jsonl`), "utf8")
-  const lines: Line[] = []
   // The first line is the header
-  for (const line of text.trim().split("\n").slice(1)) {
-    lines.push(JSON.parse(line))
-  }
-  return lines
+  return text
+    .trim()
+    .split("\n")
+    .slice(1)
+    .map((line) => JSON.parse(line))
 }
 
 // An independent usage oracle for tests: the CLI's result, rather than our stream converter.
 export function result(name: string, index = 0): SDKResultMessage {
-  let seen = 0
-  for (const line of load(name)) {
-    if (line.from === "claude" && line.message.type === "result" && seen++ === index) return line.message
-  }
+  const line = load(name).filter((line) => line.from === "claude" && line.message.type === "result")[index]
+  if (line?.from === "claude") return line.message
   throw new Error(`No result ${index} in ${name}`)
 }
 

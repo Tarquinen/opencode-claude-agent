@@ -15,9 +15,9 @@ export function make() {
   let last: string | undefined
 
   function update(id: string, usage: Usage) {
-    let counts = messages.get(id)
-    if (!counts) {
-      counts = { input: 0, read: 0, write: 0, output: 0, reasoning: 0 }
+    const saved = messages.get(id)
+    const counts = saved ?? { input: 0, read: 0, write: 0, output: 0, reasoning: 0 }
+    if (!saved) {
       messages.set(id, counts)
       last = id
     }
@@ -45,7 +45,12 @@ export function make() {
       const lastCall = last === undefined ? undefined : messages.get(last)
       const inputTotal = lastCall ? lastCall.input + lastCall.read + lastCall.write : undefined
       return {
-        inputTokens: { total: inputTotal, noCache: lastCall?.input, cacheRead: lastCall?.read, cacheWrite: lastCall?.write },
+        inputTokens: {
+          total: inputTotal,
+          noCache: lastCall?.input,
+          cacheRead: lastCall?.read,
+          cacheWrite: lastCall?.write,
+        },
         outputTokens: { total: output, reasoning, text: output - reasoning },
       }
     },

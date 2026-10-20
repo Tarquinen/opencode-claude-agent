@@ -10,13 +10,22 @@ import { Recorder } from "../lib/recorder.js"
 
 describe("Claude conversions", () => {
   test("a resumed turn keeps the whole newest user group and its attachments", () => {
-    const blocks = CatchUp.content([
-      { role: "system", content: "Built-in agent instructions" },
-      { role: "user", content: [{ type: "text", text: "Earlier question" }] },
-      { role: "assistant", content: [{ type: "text", text: "Earlier reply" }] },
-      { role: "user", content: [{ type: "text", text: "A plan-mode reminder" }] },
-      { role: "user", content: [{ type: "text", text: "Inspect this image" }, { type: "file", mediaType: "image/png", data: "AQID" }] },
-    ], 3)
+    const blocks = CatchUp.content(
+      [
+        { role: "system", content: "Built-in agent instructions" },
+        { role: "user", content: [{ type: "text", text: "Earlier question" }] },
+        { role: "assistant", content: [{ type: "text", text: "Earlier reply" }] },
+        { role: "user", content: [{ type: "text", text: "A plan-mode reminder" }] },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Inspect this image" },
+            { type: "file", mediaType: "image/png", data: "AQID" },
+          ],
+        },
+      ],
+      3,
+    )
     expect(blocks).toEqual([
       { type: "text", text: "A plan-mode reminder" },
       { type: "text", text: "Inspect this image" },
@@ -29,31 +38,50 @@ describe("Claude conversions", () => {
       { role: "system", content: "Summarize this conversation." },
       { role: "system", content: "Use one sentence." },
       { role: "user", content: [{ type: "text", text: "First question" }] },
-      { role: "assistant", content: [{ type: "reasoning", text: "Private reasoning" }, { type: "text", text: "First answer" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Private reasoning" },
+          { type: "text", text: "First answer" },
+        ],
+      },
       { role: "user", content: [{ type: "text", text: "Follow-up" }] },
     ]
     expect(ClaudeSystemPrompt.utility(prompt)).toBe("Summarize this conversation.\n\nUse one sentence.")
     expect(ConvertToClaudeMessage.content(prompt)).toEqual([
-      { type: "text", text: "<user>" }, { type: "text", text: "First question" }, { type: "text", text: "</user>" },
-      { type: "text", text: "<assistant>" }, { type: "text", text: "First answer" }, { type: "text", text: "</assistant>" },
-      { type: "text", text: "<user>" }, { type: "text", text: "Follow-up" }, { type: "text", text: "</user>" },
+      { type: "text", text: "<user>" },
+      { type: "text", text: "First question" },
+      { type: "text", text: "</user>" },
+      { type: "text", text: "<assistant>" },
+      { type: "text", text: "First answer" },
+      { type: "text", text: "</assistant>" },
+      { type: "text", text: "<user>" },
+      { type: "text", text: "Follow-up" },
+      { type: "text", text: "</user>" },
     ])
   })
 
   test("unsupported attachments report their media type instead of silently losing content", () => {
-    expect(() => ConvertToClaudeMessage.content([{ role: "user", content: [
-      { type: "file", mediaType: "image/svg+xml", data: "PHN2Zy8+" },
-    ] }])).toThrow("Claude Code does not support image/svg+xml attachments")
+    expect(() =>
+      ConvertToClaudeMessage.content([
+        { role: "user", content: [{ type: "file", mediaType: "image/svg+xml", data: "PHN2Zy8+" }] },
+      ]),
+    ).toThrow("Claude Code does not support image/svg+xml attachments")
   })
 
   test("preserves byte/base64/URL image and PDF attachments", () => {
     const bytes = new Uint8Array([1, 2, 3])
-    const blocks = ConvertToClaudeMessage.content([{ role: "user", content: [
-      { type: "text", text: "/compact @README.md are literal text" },
-      { type: "file", mediaType: "image/png", data: bytes },
-      { type: "file", mediaType: "application/pdf", data: "cGRm" },
-      { type: "file", mediaType: "image/jpeg", data: new URL("https://example.com/photo.jpg") },
-    ] }])
+    const blocks = ConvertToClaudeMessage.content([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "/compact @README.md are literal text" },
+          { type: "file", mediaType: "image/png", data: bytes },
+          { type: "file", mediaType: "application/pdf", data: "cGRm" },
+          { type: "file", mediaType: "image/jpeg", data: new URL("https://example.com/photo.jpg") },
+        ],
+      },
+    ])
     expect(blocks).toEqual([
       { type: "text", text: "/compact @README.md are literal text" },
       { type: "image", source: { type: "base64", media_type: "image/png", data: "AQID" } },
@@ -69,7 +97,10 @@ describe("Claude conversions", () => {
     if (finish?.type !== "finish") throw new Error("Expected a finish part")
     const input = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
     expect(finish.usage.inputTokens).toEqual({
-      total: input, noCache: usage.input_tokens, cacheRead: usage.cache_read_input_tokens, cacheWrite: usage.cache_creation_input_tokens,
+      total: input,
+      noCache: usage.input_tokens,
+      cacheRead: usage.cache_read_input_tokens,
+      cacheWrite: usage.cache_creation_input_tokens,
     })
     expect(finish.usage.outputTokens.total).toBe(usage.output_tokens)
   })

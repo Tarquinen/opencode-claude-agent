@@ -1,7 +1,7 @@
 export * as ClaudeProbe from "./probe.js"
 
 import { query, type AccountInfo, type ModelInfo, type Options, type Query } from "@anthropic-ai/claude-agent-sdk"
-import { Data, Effect } from "effect"
+import { Effect, Schema } from "effect"
 
 export interface Model extends ModelInfo {
   contextWindow?: number
@@ -13,7 +13,9 @@ export interface Result {
   readonly models: readonly Model[]
 }
 
-export class ProbeError extends Data.TaggedError("ClaudeProbeError")<{ readonly cause: unknown }> {}
+export class ProbeError extends Schema.TaggedError<ProbeError>()("ClaudeProbe.ProbeError", {
+  cause: Schema.Defect(),
+}) {}
 
 // Older binaries silently ignore verbatimPrompts and can interpret user text as Claude commands.
 const MINIMUM_VERSION = "2.1.248"
@@ -21,11 +23,20 @@ const MINIMUM_VERSION = "2.1.248"
 const CONTEXT_DISCOVERY_VERSION = "2.1.257"
 
 export function versionError(version: string | undefined) {
-  if (version && Bun.semver.satisfies(version, `>=${MINIMUM_VERSION}`)) return
+  if (version && atLeast(version, MINIMUM_VERSION)) return
   const message = version
     ? `Claude Code ${version} is too old; ${MINIMUM_VERSION} or later is required.`
     : "Claude Code did not report its version, so compatibility could not be checked."
   return new Error(`${message} Run \`claude update\`.`)
+}
+
+// Compares release numbers like 2.1.248. A pre-release or build suffix is ignored.
+function atLeast(version: string, minimum: string) {
+  const parse = (value: string) => value.split(/[-+]/)[0].split(".").map(Number)
+  const current = parse(version)
+  const required = parse(minimum)
+  const index = required.findIndex((part, position) => (current[position] ?? 0) !== part)
+  return index === -1 || (current[index] ?? 0) > required[index]
 }
 
 // The input never sends a message, so no model call is made and no tokens are used.
@@ -38,15 +49,17 @@ export const run = Effect.fn("ClaudeProbe.run")(function* (options: Options) {
         const init = yield* Effect.tryPromise({
           try: () => session.initializationResult(),
           catch: (cause) => new ProbeError({ cause }),
-        }).pipe(Effect.timeoutOrElse({
-          duration: "30 seconds",
-          orElse: () => Effect.fail(new ProbeError({ cause: new Error("claude did not start within 30 seconds") })),
-        }))
+        }).pipe(
+          Effect.timeoutOrElse({
+            duration: "30 seconds",
+            orElse: () => Effect.fail(new ProbeError({ cause: new Error("claude did not start within 30 seconds") })),
+          }),
+        )
         const error = versionError(init.claude_code_version)
         if (error) return yield* Effect.fail(new ProbeError({ cause: error }))
         const version = init.claude_code_version!
         const models: Model[] = init.models.map((model) => ({ ...model }))
-        if (Bun.semver.satisfies(version, `>=${CONTEXT_DISCOVERY_VERSION}`)) yield* discoverContext(session, models)
+        if (atLeast(version, CONTEXT_DISCOVERY_VERSION)) yield* discoverContext(session, models)
         return { version, account: init.account, models } satisfies Result
       }),
     (session) =>
@@ -70,15 +83,21 @@ const discoverContext = Effect.fn("ClaudeProbe.discoverContext")(
           throw new Error("Claude Code did not report a valid context window")
         }
         model.contextWindow = usage.rawMaxTokens
-      }).pipe(Effect.catch((error) => Effect.logWarning("Claude Code context discovery failed", {
-        model: model.value, cause: error.cause,
-      })))
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Claude Code context discovery failed", {
+            model: model.value,
+            cause: error.cause,
+          }),
+        ),
+      )
     }
   },
   Effect.timeoutOrElse({
     duration: "30 seconds",
     // A stuck control must not become a login failure. Closing this query cancels the pending request.
-    orElse: () => Effect.logWarning("Claude Code context discovery timed out; undiscovered models use conservative limits"),
+    orElse: () =>
+      Effect.logWarning("Claude Code context discovery timed out; undiscovered models use conservative limits"),
   }),
 )
 

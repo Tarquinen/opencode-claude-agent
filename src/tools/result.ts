@@ -1,11 +1,20 @@
 export * as ToolResult from "./result.js"
 
-import type { LanguageModelV3FilePart, LanguageModelV3Prompt, LanguageModelV3ToolResultOutput, LanguageModelV3ToolResultPart } from "@ai-sdk/provider"
+import type {
+  LanguageModelV3FilePart,
+  LanguageModelV3Prompt,
+  LanguageModelV3ToolResultOutput,
+  LanguageModelV3ToolResultPart,
+} from "@ai-sdk/provider"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import { ConvertToClaudeMessage } from "../language-model/convert-to-claude-message.js"
 import { Fingerprint } from "../sync/fingerprint.js"
 
-export function convert(output: LanguageModelV3ToolResultOutput, files: readonly LanguageModelV3FilePart[] = [], failed = false) {
+export function convert(
+  output: LanguageModelV3ToolResultOutput,
+  files: readonly LanguageModelV3FilePart[] = [],
+  failed = false,
+) {
   const parts: Array<{ type: "text"; text: string } | LanguageModelV3FilePart> = []
   switch (output.type) {
     case "text":
@@ -23,29 +32,37 @@ export function convert(output: LanguageModelV3ToolResultOutput, files: readonly
       for (const part of output.value) {
         if (part.type === "text") {
           parts.push({ type: "text", text: part.text })
-        } else if (part.type === "image-data" || part.type === "file-data") {
-          parts.push({ type: "file", mediaType: part.mediaType, data: part.data })
-        } else if (part.type === "image-url") {
-          parts.push({ type: "file", mediaType: "image/png", data: new URL(part.url) })
-        } else {
-          throw new Error(`Claude Code does not support ${part.type} tool output`)
+          continue
         }
+        if (part.type === "image-data" || part.type === "file-data") {
+          parts.push({ type: "file", mediaType: part.mediaType, data: part.data })
+          continue
+        }
+        if (part.type === "image-url") {
+          parts.push({ type: "file", mediaType: "image/png", data: new URL(part.url) })
+          continue
+        }
+        throw new Error(`Claude Code does not support ${part.type} tool output`)
       }
       break
   }
   parts.push(...files)
   const content = ConvertToClaudeMessage.content([{ role: "user", content: parts }])
-  const isError = failed || output.type === "error-text" || output.type === "error-json" || output.type === "execution-denied"
+  const isError =
+    failed || output.type === "error-text" || output.type === "error-json" || output.type === "execution-denied"
   const mcp: CallToolResult = { content: [], isError }
   let replace = false
   for (const block of content) {
-    if (block.type === "text") mcp.content.push({ type: "text", text: block.text })
-    else if (block.type === "image" && block.source.type === "base64") {
-      mcp.content.push({ type: "image", mimeType: block.source.media_type, data: block.source.data })
-    } else {
-      replace = true
-      mcp.content.push({ type: "text", text: "Attached document or image follows." })
+    if (block.type === "text") {
+      mcp.content.push({ type: "text", text: block.text })
+      continue
     }
+    if (block.type === "image" && block.source.type === "base64") {
+      mcp.content.push({ type: "image", mimeType: block.source.media_type, data: block.source.data })
+      continue
+    }
+    replace = true
+    mcp.content.push({ type: "text", text: "Attached document or image follows." })
   }
   // The PostToolUse hook replaces tool_result.content, so it needs content blocks rather than an MCP envelope.
   return { mcp, replacement: replace ? content : undefined }
