@@ -8,17 +8,18 @@ import { PassThrough } from "node:stream"
 import { createInterface } from "node:readline"
 import type { Options, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk"
 
-export const enabled = process.env.RECORD === "1"
+// Like core's recorded tests: RECORD=true refreshes recordings, and never under CI.
+export const enabled = process.env.RECORD === "true" && !process.env.CI
 
-const DIRECTORY = path.join(import.meta.dir, "../recordings")
+const DIRECTORY = path.join(import.meta.dir, "../fixtures/recordings")
 
 export type Line =
   | { readonly from: "spawn"; readonly process?: number; readonly args: readonly string[] }
   | { readonly from: "sdk"; readonly process?: number; readonly message: any }
   | { readonly from: "claude"; readonly process?: number; readonly message: any }
 
-// With RECORD=1, starts the real `claude` and captures traffic without thinking, saved by `save()` to
-// test/recordings/<name>.jsonl. Without it, `spawn` is undefined and the SDK starts `claude` itself.
+// With RECORD=true, starts the real `claude` and captures traffic without thinking, saved by `save()` to
+// test/fixtures/recordings/<name>.jsonl. Without it, `spawn` is undefined and the SDK starts `claude` itself.
 export function make(name: string, capture = false) {
   const lines: Line[] = []
   const sessionIDs = new Set<string>()
@@ -57,7 +58,7 @@ export function make(name: string, capture = false) {
       sdk: sdkVersion(),
       date: new Date().toISOString().slice(0, 10),
     }
-    const text = [header, ...lines].map((line) => JSON.stringify(line) + "\n").join("")
+    const text = [header, ...withoutLoginChecks(lines)].map((line) => JSON.stringify(line) + "\n").join("")
     // Personal details stay out of the repository
     const home = text.replaceAll(homedir(), "/home/user")
     const email = startup?.account?.email ? home.replaceAll(startup.account.email, "user@example.com") : home
@@ -68,6 +69,24 @@ export function make(name: string, capture = false) {
   }
 
   return { spawn: enabled || capture ? spawnClaude : undefined, save, sessionIDs, lines: lines as readonly Line[] }
+}
+
+// A chat recording leaves out opencode's login checks, which the fake never replays. A recording of only
+// login checks keeps them. Login checks are the only runs that don't stream partial messages.
+function withoutLoginChecks(lines: readonly Line[]) {
+  const checks = new Set<number | undefined>()
+  let chats = 0
+  for (const line of lines) {
+    if (line.from !== "spawn") continue
+    if (line.args.includes("--include-partial-messages")) chats++
+    else checks.add(line.process)
+  }
+  if (chats === 0) return lines
+  const kept: Line[] = []
+  for (const line of lines) {
+    if (!checks.has(line.process)) kept.push(line)
+  }
+  return kept
 }
 
 // Never retain thinking, including signed or redacted blocks and echoed input history.

@@ -40,21 +40,13 @@ interface Exchange extends Gates {
 export type Step = Startup | Input | Exchange
 
 // Replay the protocol exchanges of a recorded tool turn, including Claude-initiated hook/MCP requests.
-export function replay(recording: string, options: { skipProbes?: boolean } = {}): Step[] {
+export function replay(recording: string): Step[] {
   const steps: Step[] = []
   let current: Exchange | undefined
-  const probes = new Set<number>()
   for (const line of Recorder.load(recording)) {
-    // Chat recordings also capture OpenCode's login probes, which can interleave with chat. Recordings that number
-    // their processes skip each probe whole, including its context discovery.
-    if (options.skipProbes && line.process !== undefined) {
-      if (line.from === "spawn" && isProbe(line.args)) probes.add(line.process)
-      if (probes.has(line.process)) continue
-    }
     if (line.from === "sdk") {
       if (line.message.request?.subtype === "initialize") {
-        // Older recordings only had initialization probes, without process IDs or context controls.
-        if (!options.skipProbes || line.message.request.hooks) steps.push(expectStartup({ recording }))
+        steps.push(expectStartup({ recording }))
         current = undefined
         continue
       }
@@ -73,25 +65,19 @@ export function replay(recording: string, options: { skipProbes?: boolean } = {}
   return steps
 }
 
-// Login probes are the only runs that do not stream partial messages
-function isProbe(args: readonly string[]) {
-  return !args.includes("--include-partial-messages")
+// Like claude, report the SDK servers the plugin offered as connected when the recording was made without tools.
+// Recordings that list servers keep their recorded status.
+function connectServers(message: any, initialize: any) {
+  if (message.type !== "system" || message.subtype !== "init" || message.mcp_servers.length) return message
+  if (!initialize?.sdkMcpServers?.length) return message
+  const servers = []
+  for (const name of initialize.sdkMcpServers) servers.push({ name, status: "connected", source: "sdk" })
+  return { ...message, mcp_servers: servers }
 }
 
-// Text recordings predate the bridge. Mirror the offered SDK servers in their otherwise unchanged init event.
-export function withTools(message: any, initialize: any) {
-  if (
-    message.type !== "system" ||
-    message.subtype !== "init" ||
-    message.mcp_servers.length ||
-    !initialize?.sdkMcpServers?.length
-  )
-    return message
-  const init = Recorder.load("tools").find(
-    (line) => line.from === "claude" && line.message.type === "system" && line.message.subtype === "init",
-  )
-  if (!init || init.from !== "claude") throw new Error("Missing tool init recording")
-  return { ...message, mcp_servers: init.message.mcp_servers }
+// Login checks are the only runs that don't stream partial messages
+function isProbe(args: readonly string[]) {
+  return !args.includes("--include-partial-messages")
 }
 
 // Answers the SDK's start-up request with the reply from a recording. With `hold`, the reply waits until it resolves.
@@ -307,7 +293,7 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
           await Promise.race([step.beforeResult, closed])
         if (process.exitCode !== null || process.signalCode !== null) return
         const initialize = run.received.find((message) => message.request?.subtype === "initialize")?.request
-        const tools = withTools(recorded, initialize)
+        const tools = connectServers(recorded, initialize)
         // An interrupt receipt may follow another exchange, such as an MCP cancellation notification.
         const response =
           tools.type === "control_response" && step.type === "exchange"

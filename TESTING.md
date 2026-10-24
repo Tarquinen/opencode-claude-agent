@@ -17,7 +17,7 @@ Commands:
 
 - `bun test`: levels 1 to 3. Runs in CI.
 - `bun run test:live`: level 4. Needs `CLAUDE_LIVE=1` and a logged-in `claude`. Never runs in CI.
-- `RECORD=1 bun run test:live`: level 4, saving new recordings.
+- `RECORD=true bun run test:live`: level 4, saving new recordings.
 
 ## Why fake the `claude` program
 
@@ -103,13 +103,13 @@ Tests check what opencode saved, what the fake received, and what our plugin sto
 
 The model/session harness and the level 3 setup with the real `ClaudeIO` and Haiku. `test/live/chat.test.ts` runs the actual model through text, resume, cancellation/recovery, attachments and a utility call whose instructions come from the request's system message, plus one Sonnet turn for thinking, since Haiku doesn't think by default; the embedded offline test separately verifies OpenCode's database-backed restart and request headers. The title regression reads the installed OpenCode title agent's real instructions and submits a conflicting file-edit request through our title side-call path. It checks a short, single-line title rather than an attempted edit or refusal. The utility test also uses a conflicting source request, rather than an innocuous title phrase.
 
-`test/live/sync.test.ts` supplies other-model/tool history, checks all markers after incremental catch-up, deletes its own stopped Claude transcript, then verifies a full-history rebuild after rejecting an unsupported attachment. It also checks that stored boundary UUIDs occur in the real transcript. `test/recordings/sync.jsonl` (Claude Code 2.1.302, SDK 0.3.301) replays those responses offline. The embedded switching test separately runs a scripted model and a real OpenCode tool through `session.switchModel`.
+`test/live/sync.test.ts` supplies other-model/tool history, checks all markers after incremental catch-up, deletes its own stopped Claude transcript, then verifies a full-history rebuild after rejecting an unsupported attachment. It also checks that stored boundary UUIDs occur in the real transcript. `test/fixtures/recordings/sync.jsonl` (Claude Code 2.1.302, SDK 0.3.301) replays those responses offline. The embedded switching test separately runs a scripted model and a real OpenCode tool through `session.switchModel`.
 
 The tool recordings include hook and MCP control exchanges. `FakeClaude.replay` replays those exchanges through the real SDK, including a handler that stays pending across OpenCode steps. `tools.jsonl` covers two calls in one reply and a second tool step; `tools-cancel.jsonl` covers cancellation after emitted calls but before the MCP handler starts, followed by a restart; `tools-waiting-cancel.jsonl` waits for actual handler entry, interrupts it, checks transcript refusals, and continues on the same process. The offline shutdown test combines that entered-handler cancellation with the recorded restart and holds the terminal result to verify draining before closure. `tools-continue.jsonl` covers steering alongside tool feedback without ending the active turn. `tools-abort.jsonl` covers OpenCode's typed aborted result: interrupt/drain, canonical results as catch-up, and a normal new user turn on the same process. Its offline test gates the terminal result to prove the next input waits for drain. `tools-media.jsonl` covers image/PDF results, a catalog-change restart, long names and denial. Old text recordings receive a connected-server status only when the SDK actually registers one; explicit failed statuses are preserved.
 
 `test/live/tools.test.ts` refreshes those recordings and verifies real transcript boundaries. PDF replacement is an array of Anthropic content blocks, not an MCP response envelope. Active-turn steering uses priority `next`; aborted-turn recovery must use normal user input after interrupt/drain. Both paths require the exact requested reply, with tool results separate from new user content. `test/live/opencode-tools.test.ts` runs real OpenCode read/edit tools against a temporary file, waits for an actual OpenCode approval, and verifies the file only changes after approval. It then rejects another edit without feedback (ending the OpenCode turn), sends a new user message, and requires the exact reply with no further tool calls or file changes. It also checks the SDK input uses a fresh turn. It captures only its own Claude session IDs for cleanup. `test/opencode/tools.test.ts` exercises both actual host interruption and plain rejection, proving the persisted aborted error reaches the bridge and causes interrupt/drain before new input. A separate rejection-with-feedback test checks ordinary errors still continue as MCP `isError: true`. The multiline namespace test verifies the complete Code Mode catalog reaches Claude.
 
-Refresh only that recording with `CLAUDE_LIVE=1 RECORD=1 bun test test/live/sync.test.ts`. Live chat tests retain the complete delivered history, including partial cancelled replies; cleanup tracks every created Claude ID, including replacements.
+Refresh only that recording with `CLAUDE_LIVE=1 RECORD=true bun test test/live/sync.test.ts`. Live chat tests retain the complete delivered history, including partial cancelled replies; cleanup tracks every created Claude ID, including replacements.
 
 Rules:
 
@@ -118,7 +118,7 @@ Rules:
 - Uses marker membership for unconstrained prose. When a prompt explicitly asks for only a marker, compares the entire trimmed reply: quoting the marker in a refusal must fail. Titles use format/content constraints without prescribing exact wording.
 - Prints how many model calls it made.
 - Deletes the Claude sessions it created.
-- Uses its own attachment fixtures (`test/fixtures/red.png` and `marker.pdf`), with Claude sessions in a temporary folder. Regenerate those fixtures with `uv run --with reportlab python test/fixtures/create.py`.
+- Uses its own attachment fixtures (`test/fixtures/red.png` and `marker.pdf`), with Claude sessions in a temporary folder. `red.png` is a plain 64×64 red square. `marker.pdf` is one 300×150 page reading "The secret marker is LEMON-IBIS." (made once with reportlab). Both are checked in; there is nothing to regenerate.
 
 Scenarios:
 
@@ -171,7 +171,7 @@ Typecheck, all 63 offline tests and all 11 affected live chat/tool tests passed.
 - Pure tests select only matching historical checkpoints with no outstanding tool calls, including multiple tool calls whose results arrive separately. The current user group stays outside the fork, including when it matches the first or a later turn being retried.
 - `test/claude/branches.test.ts` checks undo with unchanged resubmitted input, repeated undo with remapped UUIDs, source lookup after registry reload, missing-transcript fallback, independent concurrent generate calls and cancellation, cleanup after a real recorded API failure, and compaction while a tool handler waits. A terminal-result gate proves compaction cannot fork before the old turn drains. The next primary request contains only the compacted history.
 - `test/opencode/branches.test.ts` exercises native `session.fork` and `session.revert` against the real host and verifies source history is unchanged. It also exercises native compaction, verifies the preset/task-input split, accepts OpenCode's required summary format, and starts the next primary request with that summary in a fresh Claude session. The context-edit test verifies that stale replies are excluded from the branch.
-- `test/live/branches.test.ts` has separate native fork/undo, concurrent generate, and compaction cases. Each deletes only its own Claude transcripts. `branches.jsonl`, `branch-generate.jsonl` and `branch-compaction.jsonl` record the successful paths. `branch-error.jsonl` preserves the earlier failed compaction request and checks cleanup/recovery rather than pretending it is a successful summary.
+- `test/live/branches.test.ts` has separate native fork/undo, concurrent generate, and compaction cases. Each deletes only its own Claude transcripts. `branches.jsonl`, `branch-generate.jsonl` and `branch-compaction.jsonl` record the successful paths. `billing-error.jsonl` is one turn trimmed from an earlier failed compaction that hit a billing error. Nothing produces it; it checks cleanup/recovery after a real API error, and replaces only by hand.
 - A direct SDK probe confirmed that forks copy the requested prefix with fresh UUIDs, and a resumed branch with custom `systemPrompt` and `snapshot: false` follows its own task instructions.
 
 #### Side-call rejection: comparison and resolution
@@ -238,7 +238,7 @@ Source review:
 
 ## Recordings
 
-`RECORD=1` wraps the real spawn function and saves filtered traffic in both directions, one file per scenario in `test/recordings/` (`test/lib/recorder.ts`). Never save thinking or reasoning content, signatures, or redacted thinking in fixtures or diagnostics. The recorder removes these before retaining a captured message. The live reasoning check uses no recorder and disables transcript persistence. The start-up recordings (`startup`, `startup-logged-out`) come from a login check run on its own, so each file holds one complete `claude` run.
+`RECORD=true` wraps the real spawn function and saves filtered traffic in both directions, one file per scenario in `test/fixtures/recordings/` (`test/lib/recorder.ts`). Never save thinking or reasoning content, signatures, or redacted thinking in fixtures or diagnostics. The recorder removes these before retaining a captured message. The live reasoning check uses no recorder and disables transcript persistence. The start-up recordings (`startup`, `startup-logged-out`) come from a login check run on its own, so each file holds one complete `claude` run.
 
 The chat recordings are `text` (two turns), `text-resume`, `text-cancel` (interrupt then recovery) and `utility` (side-call instructions). Each is one complete process. Chat recordings use the Claude Code preset and OpenCode runtime note; `utility` preserves the supplied task system prompt. The live test regenerates these through the plugin model itself. Run recording and offline tests sequentially, since recording replaces fixtures. Usage assertions compare converted counts with the recorded terminal result, so re-recording does not require copying token totals into test code.
 
@@ -249,8 +249,8 @@ The chat recordings are `text` (two turns), `text-resume`, `text-cancel` (interr
 On each Claude Code or SDK upgrade:
 
 1. Update the pinned SDK version, or install the new `claude`.
-2. Run `RECORD=1 bun run test:live`.
-3. Review `git diff test/recordings` for changes in the format.
+2. Run `RECORD=true bun run test:live`.
+3. Review `git diff test/fixtures/recordings` for changes in the format.
 4. Run `bun test`, and fix the fake or our code.
 5. Update the tested versions in PLAN.md's Background note.
 
@@ -347,13 +347,12 @@ test/
 │   ├── effect.ts          it.effect / it.live helper
 │   ├── fake-claude.ts     The fake claude: script steps, replies, everything the SDK sent
 │   ├── fake-io.ts         Fake claude, saved-session lookup and in-memory fork/delete
-│   ├── recorder.ts        RECORD=1: saves real claude traffic; loads recordings for the fake
+│   ├── recorder.ts        RECORD=true: saves real claude traffic; loads recordings for the fake
 │   ├── opencode.ts        Starts opencode in the test with our plugin and optional test plugins
 │   ├── sessions.ts        Model/session harness with isolated registry and storage
-│   ├── tools.ts           Tool fixtures, tool steps and a parked MCP handler
-│   └── test-plugin.ts     Scripted "normal" model, test tool, history-editing hook
-├── recordings/            Real runs, one file per scenario
-├── fixtures/              Red image, marker PDF and generator; OpenCode base prompt snapshot
+│   └── tools.ts           Tool fixtures, tool steps and a parked MCP handler
+├── fixtures/              Red image and marker PDF
+│   └── recordings/        Real runs, one file per scenario
 ├── language-model/        Levels 1 and 2, same folders as src/
 ├── sync/
 ├── tools/

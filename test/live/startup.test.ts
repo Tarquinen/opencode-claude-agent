@@ -10,7 +10,7 @@ import { it } from "../lib/effect.js"
 import { TestOpenCode } from "../lib/opencode.js"
 import { Recorder } from "../lib/recorder.js"
 
-// Needs a real, logged-in `claude`. Run with `bun run test:live`, or `RECORD=1 bun run test:live` to save new
+// Needs a real, logged-in `claude`. Run with `bun run test:live`, or `RECORD=true bun run test:live` to save new
 // recordings. `claude auth status` exits with 1 when logged out.
 const live =
   !process.env.CI && process.env.CLAUDE_LIVE === "1" && Bun.spawnSync(["claude", "auth", "status"]).exitCode === 0
@@ -35,7 +35,7 @@ const probe = (io: ClaudeIO.Interface) => {
   return ClaudeProbe.run(ClaudeQueryOptions.base({ executable, io }))
 }
 
-// A login check saved as a recording with RECORD=1
+// A login check saved as a recording with RECORD=true
 const check = Effect.fn(function* (name: string, io: ClaudeIO.Interface) {
   const recorder = Recorder.make(name)
   const result = yield* probe({ ...io, spawn: recorder.spawn })

@@ -347,7 +347,7 @@ describe("Claude tool steps", () => {
 
   it.effect("a last step without tools stops the parked turn and resumes with the saved result", () =>
     Effect.gen(function* () {
-      const claude = FakeClaude.make(FakeClaude.replay("max-steps", { skipProbes: true }))
+      const claude = FakeClaude.make(FakeClaude.replay("max-steps"))
       const test = yield* TestSessions.start(claude)
       const lookup = [{ ...TestTools.tools[0]!, inputSchema: { type: "object" as const, properties: {} } }]
       const prompt = TestSessions.prompt("Call lookup once, then call it again, then report the marker.")

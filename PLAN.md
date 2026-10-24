@@ -385,8 +385,8 @@ plugin-claude-agent/
 │       └── catch-up.ts     Turns Claude missed → catch-up message
 │
 └── test/                   Layout in TESTING.md
-    ├── lib/                Fake claude, fake ClaudeIO, opencode-in-a-test helper, test plugin
-    ├── recordings/         Real Claude runs, one file per scenario
+    ├── lib/                Fake claude, fake ClaudeIO, opencode-in-a-test helper
+    ├── fixtures/           Attachment files, and recordings/ of real Claude runs
     ├── language-model/ sync/ tools/ claude/   Same folders as src/
     ├── opencode/           Tests with opencode running inside the test
     └── live/               Opt-in tests against a real, logged-in claude
@@ -465,7 +465,7 @@ During development, opencode's config points at the plugin folder: `"plugins": [
 
 All six phases are complete on `main`, with a commit for each. New work follows the same loop:
 
-1. Record the new scenarios against real Claude Code (`RECORD=1 bun run test:live`).
+1. Record the new scenarios against real Claude Code (`RECORD=true bun run test:live`).
 2. Write the fake `claude` scripts from those recordings.
 3. Write the tests, using the lowest level that can show each case ([TESTING.md](TESTING.md)).
 4. Build until the tests pass.

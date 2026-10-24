@@ -4,7 +4,7 @@ import { ConvertClaudeStream } from "../../src/language-model/convert-claude-str
 import { Recorder } from "../lib/recorder.js"
 
 function assistant() {
-  const line = Recorder.load("branch-error").find(
+  const line = Recorder.load("billing-error").find(
     (line) => line.from === "claude" && line.message.type === "assistant" && line.message.error,
   )!
   if (line.from !== "claude") throw new Error("Expected a recorded assistant error")
@@ -15,7 +15,7 @@ describe("terminal errors", () => {
   test("a recorded billing failure is an error, not answer text", () => {
     const convert = ConvertClaudeStream.make()
     expect(convert(assistant())).toEqual([])
-    const parts = convert(Recorder.result("branch-error", 2))
+    const parts = convert(Recorder.result("billing-error"))
     expect(parts).toEqual([{ type: "error", error: expect.any(Error) }])
     if (parts[0]?.type === "error") expect(String(parts[0].error)).toContain("extra usage")
   })
