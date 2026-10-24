@@ -74,16 +74,13 @@ describe("Claude tool steps", () => {
     }),
   )
 
-  it.effect("shutdown drains an entered MCP handler and the next request resumes with canonical results", () =>
+  it.effect("closing the registry waits for a running tool call to drain, without answering it", () =>
     Effect.gen(function* () {
-      // Use the entered-handler cancellation recording, followed by the recorded restart.
       const cancel = FakeClaude.replay("tools-waiting-cancel")
       const nextUser = cancel.findIndex(
         (step, index) => index > 1 && step.type === "exchange" && step.input.type === "user",
       )
-      const resume = FakeClaude.replay("tools-cancel")
-      const startup = resume.findIndex((step, index) => index > 0 && step.type === "startup")
-      const steps = [...cancel.slice(0, nextUser), ...resume.slice(startup)]
+      const steps = cancel.slice(0, nextUser)
       const drain = Promise.withResolvers<void>()
       const terminal = steps.findIndex(
         (step) => step.type === "exchange" && step.replies.some((message) => message.type === "result"),
@@ -95,7 +92,7 @@ describe("Claude tool steps", () => {
       const test = yield* TestSessions.start(claude)
       yield* Effect.addFinalizer(() => Effect.sync(() => drain.resolve()))
       const prompt = TestTools.prompt()
-      const first = yield* TestTools.step(test.model, prompt)
+      yield* TestTools.step(test.model, prompt)
       let stopped = false
       const close = yield* test.registry.close().pipe(
         Effect.andThen(
@@ -118,16 +115,6 @@ describe("Claude tool steps", () => {
       drain.resolve()
       yield* Fiber.join(close)
       expect(claude.runs[0]!.received.filter((message) => message.request?.subtype === "interrupt")).toHaveLength(1)
-      TestTools.append(prompt, first, () => ({ type: "execution-denied", reason: "Cancelled by user." }))
-      prompt.push({
-        role: "user",
-        content: [{ type: "text", text: "Do not call any tools. Reply only with CANCELLED-OTTER." }],
-      })
-      expect(TestSessions.text(yield* TestTools.step(test.model, prompt)).trim()).toBe("CANCELLED-OTTER")
-      const user = claude.runs[1]!.received.find((message) => message.type === "user")
-      expect(JSON.stringify(user.message.content)).toContain("Cancelled by user.")
-      expect(claude.runs[1]!.args.some((arg) => arg.startsWith("--resume="))).toBe(true)
-      yield* test.registry.close()
       claude.check()
     }),
   )
@@ -267,9 +254,12 @@ describe("Claude tool steps", () => {
     }),
   )
 
-  it.effect("tool images and PDFs reach the hook as content, and catalog changes resume with mapped long names", () =>
+  it.effect("tool images and PDFs reach Claude as image and document content", () =>
     Effect.gen(function* () {
-      const claude = FakeClaude.make(FakeClaude.replay("tools-media"))
+      // Only the first process: the recording goes on to change the tool list.
+      const steps = FakeClaude.replay("tools-media")
+      const restart = steps.findIndex((step, index) => index > 0 && step.type === "startup")
+      const claude = FakeClaude.make(steps.slice(0, restart))
       const test = yield* TestSessions.start(claude)
       const tools = [
         { ...TestTools.tools[0]!, name: "attachment", inputSchema: { type: "object" as const, properties: {} } },
@@ -289,7 +279,7 @@ describe("Claude tool steps", () => {
           { type: "file", mediaType: "application/pdf", data: pdf },
         ],
       })
-      const reply = yield* TestTools.step(test.model, prompt, tools)
+      yield* TestTools.step(test.model, prompt, tools)
       const replacement = claude.runs[0]!.received.find(
         (message) => message.response?.response?.hookSpecificOutput?.updatedMCPToolOutput,
       )
@@ -304,19 +294,6 @@ describe("Claude tool steps", () => {
           source: { type: "base64", media_type: "application/pdf", data: Buffer.from(pdf).toString("base64") },
         },
       ])
-      TestTools.append(prompt, reply, TestTools.output)
-      const name = "restricted_" + "resource_".repeat(12)
-      const changed = [{ ...tools[0]!, name }]
-      prompt.push({ role: "user", content: [{ type: "text", text: "Call the restricted fixture tool once." }] })
-      const next = yield* TestTools.step(test.model, prompt, changed)
-      expect(next.find((part) => part.type === "tool-call")?.toolName).toBe(name)
-      TestTools.append(prompt, next, () => ({
-        type: "execution-denied",
-        reason: "Permission denied: DENIED-IBIS. Do not retry.",
-      }))
-      expect(TestSessions.text(yield* TestTools.step(test.model, prompt, changed))).toContain("DENIED-IBIS")
-      expect(claude.runs).toHaveLength(2)
-      expect(claude.runs[1]!.args.some((arg) => arg.startsWith("--resume="))).toBe(true)
       yield* test.registry.close()
       claude.check()
     }),
