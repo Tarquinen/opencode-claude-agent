@@ -86,12 +86,13 @@ export const step = Effect.fn(function* (
   model: ClaudeAgentLanguageModel.Model,
   prompt: LanguageModelV3Prompt,
   offered = tools,
+  kind: RequestKind.Kind = "primary",
 ) {
   const result = yield* Effect.promise(() =>
     model.doStream({
       prompt,
       tools: offered,
-      headers: { [RequestKind.SESSION_HEADER]: "session-a", [RequestKind.HEADER]: "primary" },
+      headers: { [RequestKind.SESSION_HEADER]: "session-a", [RequestKind.HEADER]: kind },
     }),
   )
   const parts = yield* Effect.tryPromise(() => TestSessions.collect(result.stream))

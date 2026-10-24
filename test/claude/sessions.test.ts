@@ -9,6 +9,7 @@ import { SessionRecord } from "../../src/sync/record.js"
 import { it } from "../lib/effect.js"
 import { FakeClaude } from "../lib/fake-claude.js"
 import { TestSessions } from "../lib/sessions.js"
+import { TestTools } from "../lib/tools.js"
 import { Recorder } from "../lib/recorder.js"
 
 const first = TestSessions.prompt("Remember the marker COPPER-OTTER. Reply only with that marker.")
@@ -460,6 +461,39 @@ describe("Claude sessions", () => {
         yield* test.registry.close()
         claude.check()
       }),
+  )
+
+  // Claude's prompt cache only matches when tools and system prompt are identical, so branches must not drop them.
+  it.effect("conversation branches send the chat's tools and system prompt, and a tool call ends the branch", () =>
+    Effect.gen(function* () {
+      // The branch replays a recorded tool call that is stopped while waiting for its result.
+      const waiting = FakeClaude.replay("tools-waiting-cancel")
+      const resumed = waiting.findIndex(
+        (step, index) => index > 1 && step.type === "exchange" && step.input.type === "user",
+      )
+      const claude = FakeClaude.make([
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn(),
+        ...waiting.slice(0, resumed),
+        FakeClaude.expectInterrupt(),
+      ])
+      const test = yield* TestSessions.start(claude)
+      yield* TestTools.step(test.model, first)
+      const parts = yield* TestTools.step(test.model, TestSessions.followup(), TestTools.tools, "generate")
+      // Claude's prompt cache only matches when tools and system prompt are identical.
+      const chat = claude.runs[0]!.received.find((message) => message.request?.subtype === "initialize").request
+      const branch = claude.runs[1]!.received.find((message) => message.request?.subtype === "initialize").request
+      expect(chat.sdkMcpServers).toEqual(["opencode"])
+      expect(branch.sdkMcpServers).toEqual(chat.sdkMcpServers)
+      expect(branch.appendSystemPrompt).toBe(chat.appendSystemPrompt)
+      expect(branch.appendSystemPrompt).toContain("<opencode_tools>")
+      // The reply ends at the tool call, and the throwaway process and fork are cleaned up.
+      expect(parts.filter((part) => part.type === "tool-call")).toHaveLength(2)
+      yield* Effect.promise(() => claude.runs[1]!.closed)
+      expect(claude.removed).toEqual([claude.forks[0]!.sessionID])
+      yield* test.registry.close()
+      claude.check()
+    }),
   )
 
   it.effect("closing the registry interrupts and drains a running side call", () =>
