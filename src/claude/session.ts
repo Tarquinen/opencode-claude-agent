@@ -1,13 +1,8 @@
 export * as ClaudeSession from "./session.js"
 
-import {
-  query,
-  type Options,
-  type SDKMessage,
-  type SDKResultMessage,
-  type SDKUserMessage,
-} from "@anthropic-ai/claude-agent-sdk"
+import type { Options, SDKMessage, SDKResultMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import { ClaudeProbe } from "./probe.js"
+import { ClaudeSDK } from "./sdk.js"
 
 interface Turn {
   readonly drained: PromiseWithResolvers<void>
@@ -16,9 +11,10 @@ interface Turn {
   finished: boolean
 }
 
-export type Interface = ReturnType<typeof start>
+export type Interface = Awaited<ReturnType<typeof start>>
 
-export function start(options: Options) {
+export async function start(options: Options) {
+  const { query } = await ClaudeSDK.load()
   let input!: ReadableStreamDefaultController<SDKUserMessage>
   const prompt = new ReadableStream<SDKUserMessage>({
     start(controller) {

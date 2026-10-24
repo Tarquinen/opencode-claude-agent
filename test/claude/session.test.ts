@@ -10,7 +10,7 @@ describe("Claude session", () => {
     async (code) => {
       const turn = FakeClaude.expectTurn({ hold: new Promise(() => {}) })
       const claude = FakeClaude.make([FakeClaude.expectStartup(), turn])
-      const session = ClaudeSession.start({
+      const session = await ClaudeSession.start({
         ...ClaudeQueryOptions.base({ executable: FakeIO.EXECUTABLE, io: FakeIO.make({ claude }) }),
         sessionId: crypto.randomUUID(),
       })

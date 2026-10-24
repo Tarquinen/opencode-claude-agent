@@ -63,17 +63,10 @@ The other option is a separate `packages/plugin-claude-agent` package, like the 
 
 ### 4. Lazy loading: startup and the hosted runtime
 
-`internal.ts` imports every built-in when opencode starts, and core also builds for workerd (see the `#imports` conditions in `packages/core/package.json`). Today these files import the SDK as runtime values at the top level:
+`internal.ts` imports every built-in when opencode starts, and core also builds for workerd (see the `#imports` conditions in `packages/core/package.json`).
 
-- `claude/session.ts`: `query`
-- `claude/probe.ts`: `query`
-- `claude/io.ts`: `deleteSession`, `getSessionInfo`, and `which`
-- `claude/fork.ts`: `deleteSession`, `forkSession`, `getSessionMessages`
-- `tools/server.ts`: MCP `Server` and request schemas
-
-Changes:
-
-- [ ] Make those imports dynamic, inside the narrowest scope that needs them. AGENTS.md asks for this for heavy modules on startup paths. Type-only imports can stay.
+- [x] **Load the SDK only when it's needed.** `claude/sdk.ts` is now the only place that imports the Agent SDK as a value: `ClaudeSDK.load()` imports it on first use and keeps it. `session.ts`, `probe.ts`, `io.ts` and `fork.ts` call it; everything else uses type-only imports. Loading the plugin no longer loads the SDK (checked with `require.cache`). In core, `sdk.ts` is where the `#claude-agent-sdk` import below goes, and where a failed import becomes a clear "the Claude Agent SDK isn't installed" error.
+- [x] **Use core's MCP package.** `tools/server.ts` now uses `@modelcontextprotocol/server` 2.3.1, which core already depends on, instead of `@modelcontextprotocol/sdk` 1.x. No new MCP dependency, so it can stay a normal import. The Agent SDK bundles its own MCP code, so it doesn't need 1.x either. The full live suite passes with it.
 - [ ] Use core's `util/which.ts` instead of importing `which` directly.
 - [x] **Never run `claude` at startup.** `index.ts` used to run `status.refresh()` on every start. As a built-in, that would spawn `claude` for every user who has it installed, even those who never use Claude Agent. Instead:
   - **Startup, every user:** no process and no SDK import. Register the `/connect` entry (it doesn't need a provider). Register the provider with the model list saved from the last check, or with no models if there isn't one. opencode hides the provider until it has a connection (`activation: "auto"` in `provider.ts` `snapshot`). Delete the Opus/Sonnet/Haiku `FALLBACK` in `plugin/provider.ts`.
@@ -89,8 +82,7 @@ Changes:
 
 ### 5. Dependencies and install size
 
-- [ ] Add `@modelcontextprotocol/sdk` (1.x) to `packages/core/package.json`. `@ai-sdk/provider` 3.0.8 and `which` 6.0.1 are already there. `effect`, `zod` and `@opencode/plugin` come from the catalog and workspace. `@anthropic-ai/claude-agent-sdk` (0.3.301) is covered below.
-- [ ] Two MCP SDK versions will live in core: core uses the 2.x split packages, and the Agent SDK needs 1.x. Keep 1.x confined to `tools/server.ts`.
+- [x] No new dependencies besides the Agent SDK. `@ai-sdk/provider` 3.0.8, `which` 6.0.1 and `@modelcontextprotocol/server` 2.3.1 are already in core. `effect`, `zod` and `@opencode/plugin` come from the catalog and workspace. `@anthropic-ai/claude-agent-sdk` (0.3.301) is covered below.
 - [ ] **The bundled `claude` binary.** The Agent SDK lists its native `claude` binary as optional dependencies, about 290 MB on disk (130 MB download) per platform. We never run it: we always pass `pathToClaudeCodeExecutable` (from `OPENCODE_CLAUDE_PATH` or `PATH`) and report "missing" instead of falling back. We use the SDK package as published: no patches, no stand-in packages. Where the binary gets downloaded:
   - **CLI users (npm `@opencode/cli`, install script, Homebrew, Docker): no.** They get the compiled binary only (`packages/cli/script/publish.ts`, `packages/cli/Dockerfile`). `bun build --compile` bundles the SDK's JavaScript, not its optional binary packages.
   - **Desktop app: no.** It ships the compiled CLI and doesn't depend on core.

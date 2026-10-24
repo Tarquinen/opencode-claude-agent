@@ -1,7 +1,8 @@
 export * as ClaudeProbe from "./probe.js"
 
-import { query, type AccountInfo, type ModelInfo, type Options, type Query } from "@anthropic-ai/claude-agent-sdk"
+import type { AccountInfo, ModelInfo, Options, Query } from "@anthropic-ai/claude-agent-sdk"
 import { Effect, Schema } from "effect"
+import { ClaudeSDK } from "./sdk.js"
 
 export interface Model extends ModelInfo {
   contextWindow?: number
@@ -43,7 +44,13 @@ function atLeast(version: string, minimum: string) {
 export const run = Effect.fn("ClaudeProbe.run")(function* (options: Options) {
   const stop = Promise.withResolvers<void>()
   return yield* Effect.acquireUseRelease(
-    Effect.sync(() => query({ prompt: waitFor(stop.promise), options: { ...options, persistSession: false } })),
+    Effect.tryPromise({
+      try: async () => {
+        const { query } = await ClaudeSDK.load()
+        return query({ prompt: waitFor(stop.promise), options: { ...options, persistSession: false } })
+      },
+      catch: (cause) => new ProbeError({ cause }),
+    }),
     (session) =>
       Effect.gen(function* () {
         const init = yield* Effect.tryPromise({

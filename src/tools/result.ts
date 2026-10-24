@@ -6,7 +6,7 @@ import type {
   LanguageModelV3ToolResultOutput,
   LanguageModelV3ToolResultPart,
 } from "@ai-sdk/provider"
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
+import type { CallToolResult } from "@modelcontextprotocol/server"
 import { ConvertToClaudeMessage } from "../language-model/convert-to-claude-message.js"
 import { Fingerprint } from "../sync/fingerprint.js"
 

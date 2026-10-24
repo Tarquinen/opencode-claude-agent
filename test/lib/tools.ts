@@ -54,25 +54,27 @@ export const park = Effect.fn(function* (io: ClaudeIO.Interface, directory: stri
   const pending = PendingTools.make()
   const entered = Promise.withResolvers<void>()
   const settled = Promise.withResolvers<void>()
-  const session = ClaudeSession.start({
-    ...ClaudeQueryOptions.base({ executable: io.which()!, io }),
-    cwd: directory,
-    model: "haiku",
-    sessionId: crypto.randomUUID(),
-    includePartialMessages: true,
-    systemPrompt: ClaudeSystemPrompt.make(prompt(), true),
-    hooks: ToolHooks.make(pending),
-    mcpServers: {
-      opencode: ToolServer.make(tools, {
-        ...pending,
-        async call(name) {
-          const result = pending.call(name)
-          entered.resolve()
-          return result.finally(() => settled.resolve())
-        },
-      }),
-    },
-  })
+  const session = yield* Effect.promise(() =>
+    ClaudeSession.start({
+      ...ClaudeQueryOptions.base({ executable: io.which()!, io }),
+      cwd: directory,
+      model: "haiku",
+      sessionId: crypto.randomUUID(),
+      includePartialMessages: true,
+      systemPrompt: ClaudeSystemPrompt.make(prompt(), true),
+      hooks: ToolHooks.make(pending),
+      mcpServers: {
+        opencode: ToolServer.make(tools, {
+          ...pending,
+          async call(name) {
+            const result = pending.call(name)
+            entered.resolve()
+            return result.finally(() => settled.resolve())
+          },
+        }),
+      },
+    }),
+  )
   yield* Effect.addFinalizer(() => Effect.promise(() => session.stop().finally(() => pending.clear())))
   yield* Effect.promise(() => session.ready)
   session.begin(ConvertToClaudeMessage.content(prompt()))

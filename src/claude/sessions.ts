@@ -150,7 +150,7 @@ export function registry() {
           return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
         }
         const pending = PendingTools.make()
-        const session = yield* attemptSync(() =>
+        const session = yield* attempt(() =>
           ClaudeSession.start(
             ClaudeQueryOptions.session({
               executable,

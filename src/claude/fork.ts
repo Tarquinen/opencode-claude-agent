@@ -1,6 +1,6 @@
 export * as ClaudeFork from "./fork.js"
 
-import { deleteSession, forkSession, getSessionMessages } from "@anthropic-ai/claude-agent-sdk"
+import { ClaudeSDK } from "./sdk.js"
 
 export interface Result {
   readonly sessionID: string
@@ -9,6 +9,7 @@ export interface Result {
 
 // The SDK gives forked messages fresh UUIDs. Verify the copied prefix before mapping checkpoints onto them.
 export async function create(sessionID: string, messageID: string): Promise<Result | undefined> {
+  const { deleteSession, forkSession, getSessionMessages } = await ClaudeSDK.load()
   const source = await getSessionMessages(sessionID)
   const end = source.findIndex((message) => message.uuid === messageID)
   if (end < 0) return

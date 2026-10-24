@@ -243,7 +243,7 @@ Notes:
 
 ### Things that need translating
 
-- **Tool definitions.** opencode tools use JSON Schema, and the SDK's TypeScript `tool()` helper only accepts zod. We build our own MCP server with the low-level `Server` class from `@modelcontextprotocol/sdk`, list the JSON Schemas directly, and pass the instance in `mcpServers` (`McpSdkServerConfigWithInstance`, `sdk.d.ts:1238`). Catalog changes restart/resume. The pinned SDK's `setMcpServers` treats a server with the same name/config as unchanged, even if its in-process instance has different tools, so the tested restart path remains deliberate rather than adding an unreliable live-update optimization.
+- **Tool definitions.** opencode tools use JSON Schema, and the SDK's TypeScript `tool()` helper only accepts zod. We build our own MCP server with the low-level `Server` class from `@modelcontextprotocol/server`, list the JSON Schemas directly, and pass the instance in `mcpServers` (`McpSdkServerConfigWithInstance`, `sdk.d.ts:1238`). Catalog changes restart/resume. The pinned SDK's `setMcpServers` treats a server with the same name/config as unchanged, even if its in-process instance has different tools, so the tested restart path remains deliberate rather than adding an unreliable live-update optimization.
 - **Tool errors.** OpenCode 2.0.31 lowers its error results to ordinary AI SDK text outputs (`aisdk.ts:665–669`). A provider-scoped context hook preserves the error status in provider metadata before conversion; the MCP bridge uses it for `isError`. It does not infer errors by parsing successful tool text.
 - **Large tool output.** Claude Code caps tool results at 25k tokens (`MAX_MCP_OUTPUT_TOKENS`) and saves text over 50k characters to a file, which Claude can't read with its tools off. We raise those limits (`_meta["anthropic/maxResultSizeChars"]` goes up to 500k) and rely on opencode's own truncation.
 - **Tool names.** Claude sees `mcp__opencode__read` while opencode's prompts say `read`, so the plugin maps names both ways. Claude Code silently hides any tool whose full name is over 128 characters. We keep full names to 64 characters and shorten longer ones with a short hash.
@@ -395,7 +395,7 @@ plugin-claude-agent/
 ### Rules
 
 1. **Only `plugin/` sees opencode's plugin context (`ctx`).** Every other module is handed what it needs when it's created, for example `sync/record.ts` gets `ctx.storage`. Most of the code doesn't depend on opencode's plugin API.
-2. **Only `claude/` loads the Claude SDK at runtime.** Every other file uses only its types. The SDK changes often, so most breakages stay in one folder. `tools/server.ts` is likewise the only runtime user of the MCP SDK.
+2. **Only `claude/sdk.ts` loads the Claude SDK at runtime,** on first use, so loading the plugin doesn't load the SDK. Every other file uses only its types. The SDK changes often, so most breakages stay in one folder. `tools/server.ts` is likewise the only runtime user of the MCP package.
 3. **`sync/` (except `record.ts`), the converters, `tools/names.ts` and `tools/result.ts` are plain functions.** They use no services and start no processes, so they are tested quickly with Claude messages taken from recordings and no mocks.
 4. **Each file has one job**, and its name says what it is.
 5. **Same style as opencode.** Modules start with the self-export (`export * as ClaudeProvider from "./provider.js"`). Each feature exports `register = Effect.fn("ClaudeProvider.register")(function* (ctx, ...) {...})`, with small helpers below it. opencode's style guide (root `AGENTS.md`) applies, and prettier formats with `semi: false, printWidth: 120`. Code that would ship in core avoids Bun-only APIs, because opencode also builds for Node: `which` finds `claude`, as `packages/core/src/util/which.ts` does.
@@ -451,7 +451,7 @@ export default make(ClaudeIO.real)
 Versions are pinned exactly, matching opencode's catalog where opencode uses the same package.
 
 - `@anthropic-ai/claude-agent-sdk`, the library that starts `claude` and speaks its protocol. Its peers `@anthropic-ai/sdk` and `zod` install automatically; message block types come through the SDK's own types, so we don't import `@anthropic-ai/sdk` directly. `zod` (opencode's 4.1.8) is a dev dependency, for one live test.
-- `@modelcontextprotocol/sdk` 1.x, for the MCP server built from JSON Schemas. opencode core uses the 2.0 split packages, but the Agent SDK requires 1.x.
+- `@modelcontextprotocol/server` 2.x, for the MCP server built from JSON Schemas. It's the same package opencode core uses; the Agent SDK bundles its own MCP code.
 - `@ai-sdk/provider` 3.0.8, for the `LanguageModelV3` types, as in opencode.
 - `which` 6.0.1, to find `claude`, as in opencode core.
 - `@opencode/plugin` and `effect` as peer dependencies with ranges (`^2.0.25 || ^0.0.0-dev`, `^4.0.0`), and exact dev dependencies. opencode supplies its own copies at runtime (`packages/plugin/src/runtime.ts:17-33`), and plugins must never bundle `effect`.

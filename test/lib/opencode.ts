@@ -44,12 +44,18 @@ export const start = Effect.fn("TestOpenCode.start")(function* (input: {
   return { opencode, directory }
 })
 
-// Picks our login method, as a user does in the provider list
+// Picks our login method, as a user does in the provider list, then waits for the check it starts to show models
+// or a problem
 export const connect = Effect.fn("TestOpenCode.connect")(function* (opencode: Client) {
   yield* opencode.integration.connect.external({
     integrationID: Integration.ID.make(ClaudeProvider.ID),
     methodID: Integration.MethodID.make(ClaudeIntegration.METHOD_ID),
   })
+  yield* waitUntil(
+    Effect.all([models(opencode), connection(opencode)]),
+    ([ids, connection]) => ids.length > 0 || connection?.status !== undefined,
+    "60 seconds",
+  )
 })
 
 export const models = Effect.fn("TestOpenCode.models")(function* (opencode: Client) {
