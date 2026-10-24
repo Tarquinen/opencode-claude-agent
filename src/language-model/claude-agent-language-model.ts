@@ -24,6 +24,7 @@ export class Model implements LanguageModelV3 {
   constructor(
     readonly modelId: string,
     readonly dependencies: Dependencies,
+    readonly connection: Readonly<Record<string, string>> = {},
   ) {}
 
   async doGenerate(_options: LanguageModelV3CallOptions): Promise<never> {
@@ -71,6 +72,7 @@ export class Model implements LanguageModelV3 {
               model: this.modelId,
               effort,
               maxOutputTokens: options.maxOutputTokens,
+              connection: this.connection,
               system,
               prompt: options.prompt,
               tools: offered,

@@ -33,6 +33,7 @@ interface Request {
   readonly model: string
   readonly effort?: Options["effort"]
   readonly maxOutputTokens?: number
+  readonly connection?: Readonly<Record<string, string>>
   readonly system: NonNullable<Options["systemPrompt"]>
   readonly prompt: LanguageModelV3Prompt
   readonly tools: readonly LanguageModelV3FunctionTool[]
@@ -66,7 +67,8 @@ export interface Interface {
   readonly run: (request: Request) => Effect.Effect<void, Error>
 }
 
-const launch = (request: Request) => JSON.stringify([request.maxOutputTokens, request.system, request.tools])
+const launch = (request: Request) =>
+  JSON.stringify([request.maxOutputTokens, request.connection, request.system, request.tools])
 
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)))
 const attempt = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: toError })
@@ -155,6 +157,7 @@ export function registry() {
             ClaudeQueryOptions.session({
               executable,
               io: input.io,
+              connection: request.connection,
               directory: input.directory,
               model: request.model,
               effort: request.effort,

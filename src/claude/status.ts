@@ -18,7 +18,10 @@ export interface Interface {
   readonly report: (next: State) => Effect.Effect<void>
 }
 
-export const make = Effect.fn("ClaudeStatus.make")(function* (io: ClaudeIO.Interface) {
+export const make = Effect.fn("ClaudeStatus.make")(function* (
+  io: ClaudeIO.Interface,
+  connection: () => Effect.Effect<Record<string, string>> = () => Effect.succeed({}),
+) {
   const state = yield* SubscriptionRef.make<State>({ type: "checking" })
   const lock = yield* Semaphore.make(1)
 
@@ -26,7 +29,8 @@ export const make = Effect.fn("ClaudeStatus.make")(function* (io: ClaudeIO.Inter
   const refresh = Effect.fn("ClaudeStatus.refresh")(function* () {
     const executable = io.which()
     if (!executable) return yield* SubscriptionRef.set(state, { type: "missing" })
-    const next = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable, io })).pipe(
+    const env = yield* connection()
+    const next = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable, io, connection: env })).pipe(
       Effect.map((probe): State => ({ type: "ready", probe })),
       Effect.catch((error) =>
         Effect.logWarning("Claude Code login check failed", { cause: error.cause }).pipe(

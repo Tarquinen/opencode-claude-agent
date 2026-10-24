@@ -23,11 +23,38 @@ const ISOLATION_ENV = {
   CLAUDE_CODE_EFFORT_LEVEL: undefined,
 }
 
-export function base(input: { executable: string; io: ClaudeIO.Interface }): Options {
+export function connectionEnv(connection: {
+  readonly settings?: Readonly<Record<string, unknown>>
+  readonly headers?: Readonly<Record<string, string>>
+  readonly body?: Readonly<Record<string, unknown>>
+}): Record<string, string> {
+  const env: Record<string, string> = {}
+  const settings = connection.settings ?? {}
+  if (typeof settings.baseURL === "string") env.ANTHROPIC_BASE_URL = settings.baseURL
+  if (typeof settings.apiKey === "string") env.ANTHROPIC_API_KEY = settings.apiKey
+  if (typeof settings.authToken === "string") env.ANTHROPIC_AUTH_TOKEN = settings.authToken
+  if (typeof settings.headerTimeout === "number") env.API_TIMEOUT_MS = String(settings.headerTimeout)
+  if (typeof settings.chunkTimeout === "number") env.CLAUDE_STREAM_IDLE_TIMEOUT_MS = String(settings.chunkTimeout)
+  const headers: string[] = []
+  for (const [name, value] of Object.entries(connection.headers ?? {})) {
+    headers.push(`${name}: ${value}`)
+  }
+  if (headers.length > 0) env.ANTHROPIC_CUSTOM_HEADERS = headers.join("\n")
+  if (connection.body !== undefined && Object.keys(connection.body).length > 0) {
+    env.CLAUDE_CODE_EXTRA_BODY = JSON.stringify(connection.body)
+  }
+  return env
+}
+
+export function base(input: {
+  executable: string
+  io: ClaudeIO.Interface
+  connection?: Readonly<Record<string, string>>
+}): Options {
   return {
     pathToClaudeCodeExecutable: input.executable,
     spawnClaudeCodeProcess: input.io.spawn,
-    env: { ...input.io.env(), ...ISOLATION_ENV },
+    env: { ...input.io.env(), ...input.connection, ...ISOLATION_ENV },
     settingSources: [],
     settings: { disableAllHooks: true },
     // Without summaries, OpenCode has no reasoning text to display
@@ -44,6 +71,7 @@ export function base(input: { executable: string; io: ClaudeIO.Interface }): Opt
 export function session(input: {
   readonly executable: string
   readonly io: ClaudeIO.Interface
+  readonly connection?: Readonly<Record<string, string>>
   readonly directory: string
   readonly model: string
   readonly effort?: Options["effort"]
