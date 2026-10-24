@@ -51,7 +51,7 @@ export const model = Effect.fn(function* (sessions: ClaudeSessions.Interface) {
 export const start = Effect.fn(function* (claude: FakeClaude.Fake, saved = storage()) {
   const registry = ClaudeSessions.registry()
   yield* Effect.addFinalizer(() => registry.close())
-  const input = { io: FakeIO.make({ claude }), options: {}, storage: saved, directory: "/tmp/opencode" }
+  const input = { io: FakeIO.make({ claude }), storage: saved, directory: "/tmp/opencode" }
   const sessions = yield* registry.attach(input)
   return { registry, input, model: yield* model(sessions), storage: saved }
 })

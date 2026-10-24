@@ -100,8 +100,6 @@ const { messages } = await oc.session.export({ sessionID: session.id })
 
 Tests check what opencode saved, what the fake received, and what our plugin stored.
 
-**Packaging check.** One test loads the plugin from its folder through an opencode config file, in a fresh home folder, with a fake `claude` executable (`test/bin/claude`, the same fake over real stdin and stdout) passed through the plugin's `claudePath` option. It runs `opencode auth login`, `opencode models`, and an `opencode run` that gets a reply. It checks the root `server.ts`, real option parsing and, through `opencode run`, the `file://` placeholder in the released `opencode`. It uses the `opencode` on `PATH` and is skipped if there isn't one.
-
 ## Level 4: live
 
 The model/session harness and the level 3 setup with the real `ClaudeIO` and Haiku. `test/live/chat.test.ts` runs the actual model through text, resume, cancellation/recovery, attachments and a utility call whose instructions come from the request's system message, plus one Sonnet turn for thinking, since Haiku doesn't think by default; the embedded offline test separately verifies OpenCode's database-backed restart and request headers. The title regression reads the installed OpenCode title agent's real instructions and submits a conflicting file-edit request through our title side-call path. It checks a short, single-line title rather than an attempted edit or refusal. The utility test also uses a conflicting source request, rather than an innocuous title phrase.
@@ -283,10 +281,10 @@ opencode's unit test rules apply (`.opencode/skills/unit-tests` in the opencode 
 
 - `bun test`, with a timeout on each test.
 - No sleeps. Races are tested with gates (`Deferred`) and the fake's steps. Registry timer tests use Effect's `TestClock`. The embedded host owns a separate clock, so its restart test gives each opencode host its own registry and closes it, as an exiting opencode process would, instead of waiting out the ten-second handover.
-- No `mock.module` and no `globalThis`. Fakes come in through `ClaudeIO` and plugin options.
+- No `mock.module` and no `globalThis`. Fakes come in through `ClaudeIO`.
 - Each test gets its own temporary folders.
 - A small `it.effect` / `it.live` helper copied from opencode's `packages/core/test/lib/effect.ts`, since opencode doesn't publish its test helpers.
-- Few real processes. Only the packaging check and live tests start any.
+- Few real processes. Only live tests start any.
 
 ## Cases to cover
 
@@ -358,8 +356,6 @@ test/
 │   ├── sessions.ts        Model/session harness with isolated registry and storage
 │   ├── tools.ts           Tool fixtures, tool steps and a parked MCP handler
 │   └── test-plugin.ts     Scripted "normal" model, test tool, history-editing hook
-├── bin/
-│   └── claude             The fake as a real executable, for the packaging check
 ├── recordings/            Real runs, one file per scenario
 ├── fixtures/              Red image, marker PDF and generator; OpenCode base prompt snapshot
 ├── language-model/        Levels 1 and 2, same folders as src/

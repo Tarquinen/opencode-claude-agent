@@ -118,7 +118,7 @@ In-process MCP servers have no timeout by default (`sdk.d.ts:622-660`), so a han
 - **System prompt.** Chat uses `{ type: "preset", preset: "claude_code", append: ..., snapshot: false }`, keeping Claude Code's own instructions and appending a short note that it runs in OpenCode. This follows OpenChamber and T3 Code. We do not forward opencode's assembled built-in agent prompt. The append also carries the custom agent role, tool-routing guidance when tools are offered, and the MCP instructions, skill list, Code Mode catalog and instruction files copied out of opencode's system prompt. The `context`, `generate` and `compaction` hooks obtain the role through `ctx.agent.get`; the converter retains OpenCode's rendered `Instructions from:` blocks up to its date/environment section, without reading files again. Changing the effective append restarts/resumes the process. `snapshot: false` is required because the SDK otherwise preserves the original rendered system prompt across resumes, ignoring later append changes. OpenCode's chronological instruction updates remain ordinary history input. Conversation branches retain the same preset; OpenCode supplies their task in user input. Standalone titles use OpenCode's title instructions as the SDK system prompt, with source conversation kept in the user message.
 - **Process lifetime.** One `claude` process per active opencode session. It is stopped after an idle period and resumed with `resume` when needed. Processes live in one registry for the whole opencode process, not inside a single plugin setup, so a plugin reload doesn't kill running sessions: the old setup keeps them for about 10 seconds so the new one can take them over. A session's process is replaced one at a time, so a restart waits for the previous one to finish. After compaction the old process is never reused.
 - **Stopping a process.** Always in this order: `interrupt()`, then read the remaining messages until Claude Code has finished writing its session file, then close. Closing first, or failing waiting tool handlers first, can make Claude start another model call or leave its session file on the wrong branch.
-- **Finding `claude`.** The plugin passes the user's installed binary in `pathToClaudeCodeExecutable`, so the SDK's bundled copy, which `bun install` adds as an optional dependency, is never used. On Windows it uses `claude.exe`, not the `.cmd` wrapper.
+- **Finding `claude`.** The plugin passes the user's installed binary in `pathToClaudeCodeExecutable`: the path in `OPENCODE_CLAUDE_PATH` if set, otherwise `claude` on `PATH`. That way the SDK's bundled copy, which `bun install` adds as an optional dependency, is never used. On Windows it uses `claude.exe`, not the `.cmd` wrapper.
 - **Login check.** Before offering the models, check that `claude` is installed and logged in, without using any tokens. Start a session whose input never sends a message, call `initializationResult()`, read each model's context size (see "Context size"), then close it. It writes no session file and returns the Claude Code version, the account and the model list. A logged-out `claude` still starts and reports `tokenSource: "none"` with no API key; every other account counts as logged in, including API keys and cloud providers. The check runs when the plugin starts and again each time the user connects the login method, because opencode keeps a problem per connection (a new connection starts with none) and the user may have just run `claude auth login`. Checks run one at a time and look up the executable each time, so connecting after installing or signing in can recover without a plugin reload.
 - **Version check.** The reported version must be at least 2.1.248, which added `verbatimPrompts`; older binaries silently ignore it. Binaries that report an older version, or omit their version, get a message to run `claude update`. This is a minimum feature check; the tested versions are listed in Background.
 - **Usage.** Each step reports the token counts of its own Claude call. Claude Code can report the same API call more than once while it streams, so the plugin keeps the largest count per API message ID instead of adding them up. Adding them up would make opencode think the context is bigger than it is and compact too early. Cost is covered by the subscription, so the models have an empty cost list and Claude's `total_cost_usd` (a list-price estimate) isn't shown.
@@ -342,8 +342,7 @@ plugin-claude-agent/
 ├── TESTING.md
 ├── OPENCODE-FIX.md
 ├── src/
-│   ├── index.ts            The plugin: built from ClaudeIO, reads options, creates shared services, runs each feature
-│   ├── options.ts          Plugin options (path to claude, idle timeout), checked once
+│   ├── index.ts            The plugin: built from ClaudeIO, creates shared services, runs each feature
 │   │
 │   ├── plugin/             One file per opencode area we hook into, each a small define(...)
 │   │   ├── provider.ts     ctx.provider: the "Claude Agent" provider and its models
@@ -387,7 +386,6 @@ plugin-claude-agent/
 │
 └── test/                   Layout in TESTING.md
     ├── lib/                Fake claude, fake ClaudeIO, opencode-in-a-test helper, test plugin
-    ├── bin/claude          The fake claude as an executable, for the packaging check
     ├── recordings/         Real Claude runs, one file per scenario
     ├── language-model/ sync/ tools/ claude/   Same folders as src/
     ├── opencode/           Tests with opencode running inside the test
@@ -407,16 +405,14 @@ plugin-claude-agent/
 ```ts
 export const ID = "opencode.claude-agent"
 
-// Tests pass a fake ClaudeIO here, because config options can't hold functions.
-// The registry lives outside setup's scope, so a reload can adopt its processes.
+// Tests pass a fake ClaudeIO here. The registry lives outside setup's scope, so a reload can adopt its processes.
 // Restart tests pass their own and close it, as an exiting opencode would.
 export const make = (io: ClaudeIO.Interface, registry = ClaudeSessions.registry()) =>
   define({
     id: ID,
     effect: Effect.fn("ClaudeAgent.Plugin")(function* (ctx) {
-      const options = yield* ClaudeAgentOptions.decode(ctx.options).pipe(Effect.orDie)
-      const status = yield* ClaudeStatus.make({ options, io })
-      const sessions = yield* registry.attach({ options, io, storage: ctx.storage, directory: ctx.location.directory })
+      const status = yield* ClaudeStatus.make(io)
+      const sessions = yield* registry.attach({ io, storage: ctx.storage, directory: ctx.location.directory })
       yield* ClaudeProvider.register(ctx, status)
       yield* ClaudeIntegration.register(ctx, status)
       yield* ClaudeAISDK.register(ctx, sessions)
@@ -464,7 +460,7 @@ Versions are pinned exactly, matching opencode's catalog where opencode uses the
 - Tooling matches opencode: `tsc` from `@typescript/native` (`npm:typescript@7.0.2`), `tsconfig.json` extending `@tsconfig/bun`, `@types/bun` 1.4.0 and prettier 3.6.2.
 - We always pass the user's `claude` binary, so the SDK's bundled Claude Code binary is never run. It is an optional dependency of about 250 MB per platform that npm and Bun still download. Skipping optional dependencies isn't an option here, because TypeScript 7 ships its compiler the same way. Once built in, opencode compiles to one executable that includes only the SDK's JavaScript, so the binary would not ship.
 
-During development, opencode's config points at the plugin folder: `"plugins": ["/home/dan/src/opencode-claude-agent"]`, or `{ "package": "...", "options": {...} }` to pass options. For a local folder, opencode ignores `package.json` and looks for a root `server.ts` or `index.ts` (`packages/plugin/src/host.ts:17-43`), so the root `server.ts` re-exports `src/index.ts`.
+During development, opencode's config points at the plugin folder: `"plugins": ["/home/dan/src/opencode-claude-agent"]`. The plugin takes no options; set `OPENCODE_CLAUDE_PATH` to use a `claude` that isn't on `PATH`. For a local folder, opencode ignores `package.json` and looks for a root `server.ts` or `index.ts` (`packages/plugin/src/host.ts:17-43`), so the root `server.ts` re-exports `src/index.ts`.
 
 ## Implementation process
 

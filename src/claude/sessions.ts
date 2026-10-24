@@ -11,7 +11,6 @@ import { Effect, Fiber, Semaphore } from "effect"
 import { ClaudeIO } from "./io.js"
 import { ClaudeQueryOptions } from "./query-options.js"
 import { ClaudeSession } from "./session.js"
-import type { ClaudeAgentOptions } from "../options.js"
 import { SessionRecord } from "../sync/record.js"
 import { Checkpoints } from "../sync/checkpoints.js"
 import { SyncDecision } from "../sync/decide.js"
@@ -125,7 +124,6 @@ export function registry() {
 
   const attach = Effect.fn("ClaudeSessions.attach")(function* (input: {
     readonly io: ClaudeIO.Interface
-    readonly options: ClaudeAgentOptions.Options
     readonly storage: SessionRecord.Storage
     readonly directory: string
   }) {
@@ -143,7 +141,7 @@ export function registry() {
 
     const open = Effect.fn("ClaudeSessions.open")(function* (entry: Entry, request: Request) {
       if (!entry.process) {
-        const executable = ClaudeQueryOptions.executable(input)
+        const executable = input.io.which()
         if (!executable) return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
         const pending = PendingTools.make()
         const session = yield* attemptSync(() =>
@@ -292,7 +290,7 @@ export function registry() {
         temporary.delete(entry)
         return
       }
-      entry.idle = yield* Effect.sleep(input.options.idleTimeoutMs ?? IDLE_MS).pipe(
+      entry.idle = yield* Effect.sleep(IDLE_MS).pipe(
         Effect.andThen(entry.lock.withPermit(stop(entry))),
         Effect.catch((error) => Effect.logWarning(error)),
         Effect.forkDetach,

@@ -36,7 +36,6 @@ describe.skipIf(!live)("chat against real Claude", () => {
           yield* Effect.addFinalizer(() => registry.close().pipe(Effect.andThen(Effect.sync(() => recorder.save()))))
           const sessions = yield* registry.attach({
             io: { ...ClaudeIO.real, spawn: recorder.spawn },
-            options: {},
             storage,
             directory,
           })
@@ -142,7 +141,6 @@ describe.skipIf(!live)("chat against real Claude", () => {
         yield* Effect.addFinalizer(() => registry.close().pipe(Effect.andThen(Effect.sync(() => recorder.save()))))
         const sessions = yield* registry.attach({
           io: { ...ClaudeIO.real, spawn: recorder.spawn },
-          options: {},
           storage: TestSessions.storage(),
           directory,
         })
@@ -185,7 +183,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
         yield* test.opencode.model.list({ location: { directory } })
         const agent = yield* test.opencode.agent.get({ agentID: Agent.ID.make("title"), location: { directory } })
         expect(agent.data.system).toBeTruthy()
-        const sessions = yield* registry.attach({ io, options: {}, storage: TestSessions.storage(), directory })
+        const sessions = yield* registry.attach({ io, storage: TestSessions.storage(), directory })
         const parts = yield* TestSessions.reply(
           yield* TestSessions.model(sessions),
           [
@@ -224,7 +222,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
         const storage = TestSessions.storage()
         const registry = ClaudeSessions.registry()
         yield* Effect.addFinalizer(() => registry.close())
-        const sessions = yield* registry.attach({ io: ClaudeIO.real, options: {}, storage, directory })
+        const sessions = yield* registry.attach({ io: ClaudeIO.real, storage, directory })
         const haiku = yield* TestSessions.model(sessions)
         const sonnet = new ClaudeAgentLanguageModel.Model("sonnet", haiku.dependencies)
         // No session ID: the SDK runs without persisting a transcript.

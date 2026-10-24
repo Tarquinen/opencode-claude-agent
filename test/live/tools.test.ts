@@ -31,7 +31,6 @@ const setup = Effect.fn(function* (name: string, capture = false) {
   )
   const sessions = yield* registry.attach({
     io: { ...ClaudeIO.real, spawn: recorder.spawn },
-    options: {},
     storage,
     directory,
   })

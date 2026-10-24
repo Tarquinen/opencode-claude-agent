@@ -36,7 +36,6 @@ describe.skipIf(!live)("history sync against real Claude", () => {
         )
         const sessions = yield* registry.attach({
           io: { ...ClaudeIO.real, spawn: recorder.spawn },
-          options: {},
           storage,
           directory,
         })

@@ -17,7 +17,7 @@ export interface Interface {
 }
 
 export const real: Interface = {
-  which: () => whichPkg.sync("claude", { nothrow: true }) ?? undefined,
+  which: () => process.env.OPENCODE_CLAUDE_PATH || whichPkg.sync("claude", { nothrow: true }) || undefined,
   env: () => process.env,
   sessionExists: async (sessionID) => (await getSessionInfo(sessionID)) !== undefined,
   fork: ClaudeFork.create,

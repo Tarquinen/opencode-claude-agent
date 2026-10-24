@@ -12,7 +12,7 @@ describe("login status", () => {
       const claude = FakeClaude.make([FakeClaude.expectStartup()])
       let executable: string | undefined
       const io = { ...FakeIO.make({ claude }), which: () => executable }
-      const status = yield* ClaudeStatus.make({ options: {}, io })
+      const status = yield* ClaudeStatus.make(io)
 
       yield* status.refresh()
       expect(yield* SubscriptionRef.get(status.state)).toEqual({ type: "missing" })
@@ -30,7 +30,7 @@ describe("login status", () => {
       const atStart = FakeClaude.expectStartup({ recording: "startup-logged-out", hold: hold.promise })
       const onConnect = FakeClaude.expectStartup()
       const claude = FakeClaude.make([atStart, onConnect])
-      const status = yield* ClaudeStatus.make({ options: {}, io: FakeIO.make({ claude }) })
+      const status = yield* ClaudeStatus.make(FakeIO.make({ claude }))
 
       const startup = yield* status.refresh().pipe(Effect.forkScoped)
       yield* Effect.promise(() => claude.started(atStart))
@@ -51,7 +51,7 @@ describe("login status", () => {
   it.effect("reports a failed startup and recovers on the next check", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make([FakeClaude.expectStartup({ exitCode: 1 }), FakeClaude.expectStartup()])
-      const status = yield* ClaudeStatus.make({ options: {}, io: FakeIO.make({ claude }) })
+      const status = yield* ClaudeStatus.make(FakeIO.make({ claude }))
 
       yield* status.refresh()
       const failed = yield* SubscriptionRef.get(status.state)
