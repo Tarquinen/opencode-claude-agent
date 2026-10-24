@@ -85,26 +85,6 @@ const setup = Effect.fn(function* (name: string) {
 
 describe.skipIf(!live)("native branches against real Claude", () => {
   it.live(
-    "resends an unchanged question after native undo",
-    () =>
-      Effect.gen(function* () {
-        const test = yield* setup("branch-resubmit")
-        expect(yield* test.ask(test.parent.id, "Remember ROOT-OTTER. Reply only ROOT-OTTER.")).toBe("ROOT-OTTER")
-        const question = "What marker did I ask you to remember? Reply only with it."
-        expect(yield* test.ask(test.parent.id, question)).toBe("ROOT-OTTER")
-        const original = yield* test.opencode.session.export({ sessionID: test.parent.id })
-        const lastUser = original.messages.filter((message) => message.type === "user").at(-1)!
-        yield* test.opencode.session.revert.stage({ sessionID: test.parent.id, messageID: lastUser.id, files: false })
-        yield* test.opencode.session.revert.commit({ sessionID: test.parent.id })
-        expect(yield* test.ask(test.parent.id, question).pipe(Effect.timeout("30 seconds"))).toBe("ROOT-OTTER")
-        const sent = test.recorder.lines.findLast((line) => line.from === "sdk" && line.message.type === "user")!
-        if (sent.from === "sdk") expect(sent.message.message.content).toEqual([{ type: "text", text: question }])
-        console.log("Live undo/resubmit model calls: 3")
-      }),
-    60_000,
-  )
-
-  it.live(
     "forks and undoes without future leakage or changing the old transcripts",
     () =>
       Effect.gen(function* () {

@@ -86,7 +86,7 @@ describe("tool bridge conversion", () => {
 
   test("the preset receives tool context, explicit roles and complete instruction files", () => {
     const catalog =
-      "# Code Mode\n\nUse execute and search.\n\n## Available tools\n\n- example (1 tool)\n  - tools.example.read({\n      path: string,\n    }): Promise<string>\n"
+      "# Code Mode\n\nUse execute and search.\n\n## Available tools\n\n- accounts (1 tool) // Customer account tools.\nUse the account ID from search.\n  - tools.accounts.search(): Promise<unknown>\n- example (1 tool)\n  - tools.example.read({\n      path: string,\n    }): Promise<string>\n"
     const mcp = '<mcp_instructions>\n  <server name="example">Use its documented paths.</server>\n</mcp_instructions>'
     const skills =
       "Skills provide specialized instructions and workflows for specific tasks.\n<available_skills><skill>fixture</skill></available_skills>"

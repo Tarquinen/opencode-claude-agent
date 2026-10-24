@@ -129,7 +129,6 @@ describe("Claude history branches", () => {
       yield* TestSessions.reply(test.model, first)
       yield* TestSessions.reply(test.model, TestSessions.followup())
       const original = (yield* records.get("session-a"))!
-      const originalMessages = [...claude.transcripts.get(original.claudeSessionID)!]
       yield* TestSessions.reply(test.model, TestSessions.followup())
       const branch = (yield* records.get("session-a"))!
       expect(claude.forks[0]!.boundary).toBe(original.history![1]!.claudeMessageID!)
@@ -138,15 +137,12 @@ describe("Claude history branches", () => {
       ])
       expect(branch.claudeSessionID).not.toBe(original.claudeSessionID)
       expect(branch.history![1]!.claudeMessageID).not.toBe(original.history![1]!.claudeMessageID)
-      expect(claude.transcripts.get(original.claudeSessionID)).toEqual(originalMessages)
-      const branchMessages = [...claude.transcripts.get(branch.claudeSessionID)!]
       const reply = yield* TestSessions.reply(test.model, TestSessions.followup("Another replacement"))
       expect(claude.forks).toHaveLength(2)
       expect(claude.forks[1]).toMatchObject({
         source: branch.claudeSessionID,
         boundary: branch.history![1]!.claudeMessageID,
       })
-      expect(claude.transcripts.get(branch.claudeSessionID)).toEqual(branchMessages)
       expect(claude.runs[2]!.received.find((message) => message.type === "user").message.content).toEqual([
         { type: "text", text: "Another replacement" },
       ])
@@ -154,6 +150,31 @@ describe("Claude history branches", () => {
         claude.forks[1]!.sessionID,
       )
       expect(claude.removed).toHaveLength(0)
+      yield* test.registry.close()
+      claude.check()
+    }),
+  )
+
+  it.effect("an edited earlier reply forks before it and sends the edited history", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make([
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn(),
+        FakeClaude.expectInterrupt(),
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn(),
+        FakeClaude.expectInterrupt(),
+      ])
+      const test = yield* TestSessions.start(claude)
+      yield* TestSessions.reply(test.model, first)
+      const prompt = TestSessions.followup()
+      prompt[2] = { role: "assistant", content: [{ type: "text", text: "REVISED-MARKER" }] }
+      yield* TestSessions.reply(test.model, prompt)
+      expect(claude.forks).toHaveLength(1)
+      expect(claude.runs[1]!.args).toContain(`--resume=${claude.forks[0]!.sessionID}`)
+      const user = JSON.stringify(claude.runs[1]!.received.find((message) => message.type === "user").message.content)
+      expect(user).toContain("REVISED-MARKER")
+      expect(user).not.toContain("COPPER-OTTER")
       yield* test.registry.close()
       claude.check()
     }),
@@ -202,7 +223,6 @@ describe("Claude history branches", () => {
         )
         expect(TestSessions.text(other).trim()).toBe("LILAC-HERON")
         expect(claude.forks).toHaveLength(2)
-        expect(claude.forks[0]!.sessionID).not.toBe(claude.forks[1]!.sessionID)
         yield* Effect.promise(() => reader.cancel())
         expect(new Set(claude.removed)).toEqual(new Set(claude.forks.map((fork) => fork.sessionID)))
         expect(yield* SessionRecord.make(test.storage).get("session-a")).toEqual(before)

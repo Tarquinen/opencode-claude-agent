@@ -107,7 +107,6 @@ describe.skipIf(!live)("real Claude through OpenCode tools", () => {
           registry.close().pipe(
             Effect.andThen(
               Effect.promise(async () => {
-                recorder.save()
                 for (const id of recorder.sessionIDs) await deleteSession(id, { dir: directory })
               }),
             ),

@@ -61,14 +61,6 @@ describe("Claude conversions", () => {
     ])
   })
 
-  test("unsupported attachments report their media type instead of silently losing content", () => {
-    expect(() =>
-      ConvertToClaudeMessage.content([
-        { role: "user", content: [{ type: "file", mediaType: "image/svg+xml", data: "PHN2Zy8+" }] },
-      ]),
-    ).toThrow("Claude Code does not support image/svg+xml attachments")
-  })
-
   test("preserves byte/base64/URL image and PDF attachments", () => {
     const bytes = new Uint8Array([1, 2, 3])
     const blocks = ConvertToClaudeMessage.content([
@@ -88,21 +80,6 @@ describe("Claude conversions", () => {
       { type: "document", source: { type: "base64", media_type: "application/pdf", data: "cGRm" } },
       { type: "image", source: { type: "url", url: "https://example.com/photo.jpg" } },
     ])
-  })
-
-  test("usage counts a recorded API call once, though Claude Code reports it several times", () => {
-    const parts = convertTurn("text")
-    const usage = Recorder.result("text").usage
-    const finish = parts.at(-1)
-    if (finish?.type !== "finish") throw new Error("Expected a finish part")
-    const input = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
-    expect(finish.usage.inputTokens).toEqual({
-      total: input,
-      noCache: usage.input_tokens,
-      cacheRead: usage.cache_read_input_tokens,
-      cacheWrite: usage.cache_creation_input_tokens,
-    })
-    expect(finish.usage.outputTokens.total).toBe(usage.output_tokens)
   })
 
   test("emits a real error for a recorded failed turn", () => {

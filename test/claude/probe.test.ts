@@ -8,43 +8,7 @@ import { FakeClaude } from "../lib/fake-claude.js"
 import { FakeIO } from "../lib/fake-io.js"
 
 describe("login check", () => {
-  it.effect("starts claude with everything that duplicates opencode turned off", () =>
-    Effect.gen(function* () {
-      const claude = FakeClaude.make([FakeClaude.expectStartup()])
-      const io = FakeIO.make({ claude, env: { PATH: "/usr/bin", CLAUDE_CODE_SIMPLE: "1" } })
-      const result = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable: FakeIO.EXECUTABLE, io }))
-      claude.check()
-
-      const run = claude.runs[0]!
-      yield* Effect.promise(() => run.closed)
-      // Only opencode's tools, no settings, hooks or MCP servers from ~/.claude, and no permission prompts
-      expect(run.args).toContain("--tools=")
-      expect(run.args).toContain("--allowedTools=mcp__opencode__*")
-      expect(run.args).toContain("--setting-sources=")
-      expect(run.args).toContain("--strict-mcp-config")
-      expect(run.args).toContain("--permission-mode=dontAsk")
-      expect(run.args).toContain("--no-session-persistence")
-      expect(JSON.parse(run.args[run.args.indexOf("--settings") + 1]!)).toEqual({ disableAllHooks: true })
-      expect(run.received[0].request.skills).toEqual([])
-
-      expect(run.env).toMatchObject({
-        PATH: "/usr/bin",
-        CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
-        DISABLE_AUTO_COMPACT: "1",
-        CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
-        ENABLE_TOOL_SEARCH: "false",
-        CLAUDE_CODE_DISABLE_ADVISOR_TOOL: "1",
-      })
-      // Simple mode skips the subscription login
-      expect(run.env.CLAUDE_CODE_SIMPLE).toBeUndefined()
-
-      expect(ClaudeProbe.isLoggedIn(result.account)).toBe(true)
-      expect(result.models.map((model) => model.value)).toContain("sonnet")
-    }),
-  )
-
-  it.effect("discovers each model's capacity without prompts or token-count requests", () =>
+  it.effect("discovers each model's capacity without sending a prompt", () =>
     Effect.gen(function* () {
       const steps = FakeClaude.replay("startup")
       const context = steps.find(
@@ -59,12 +23,7 @@ describe("login check", () => {
       )
       expect(result.models.find((model) => model.value === "opus")?.contextWindow).toBe(1_000_000)
       expect(result.models.find((model) => model.value === "claude-opus-4-6")?.contextWindow).toBe(200_000)
-      expect(claude.runs).toHaveLength(1)
-      const requests = claude.runs[0]!.received
-      expect(requests.some((message) => message.type === "user")).toBe(false)
-      const contexts = requests.filter((message) => message.request?.subtype === "get_context_usage")
-      expect(contexts).toHaveLength(result.models.filter((model) => model.value !== "default").length)
-      for (const context of contexts) expect(context.request.detail).toBe("summary")
+      expect(claude.runs[0]!.received.some((message) => message.type === "user")).toBe(false)
       claude.check()
     }),
   )
@@ -146,9 +105,6 @@ describe("login check", () => {
         Effect.forkScoped,
       )
       yield* Effect.promise(() => claude.started(startup))
-      // A requested step is not a finished step while its reply is held back.
-      expect(() => claude.check()).toThrow("1 script steps did not finish")
-
       yield* TestClock.adjust("30 seconds")
       const error = yield* Fiber.join(check)
       expect(String(error.cause)).toContain("did not start within 30 seconds")

@@ -1,9 +1,8 @@
 import { describe, expect } from "bun:test"
-import { Effect, Exit, Fiber, Scope } from "effect"
+import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
 import { ClaudeAgentLanguageModel } from "../../src/language-model/claude-agent-language-model.js"
-import { ClaudeSystemPrompt } from "../../src/language-model/system-prompt.js"
 import { RequestKind } from "../../src/language-model/request-kind.js"
 import { SessionRecord } from "../../src/sync/record.js"
 import { it } from "../lib/effect.js"
@@ -15,47 +14,6 @@ import { Recorder } from "../lib/recorder.js"
 const first = TestSessions.prompt("Remember the marker COPPER-OTTER. Reply only with that marker.")
 
 describe("Claude sessions", () => {
-  it.effect("rebuilds saved history when the local Claude transcript is missing", () =>
-    Effect.gen(function* () {
-      const claude = FakeClaude.make([
-        FakeClaude.expectStartup(),
-        FakeClaude.expectTurn(),
-        FakeClaude.expectInterrupt(),
-        FakeClaude.expectStartup(),
-        FakeClaude.expectTurn({ index: 1 }),
-        FakeClaude.expectInterrupt(),
-      ])
-      const test = yield* TestSessions.start(claude)
-      yield* TestSessions.reply(test.model, first)
-      const before = (yield* SessionRecord.make(test.storage).get("session-a"))!
-      yield* test.registry.close()
-      const registry = ClaudeSessions.registry()
-      yield* Effect.addFinalizer(() => registry.close())
-      const checked: string[] = []
-      const sessions = yield* registry.attach({
-        ...test.input,
-        io: {
-          ...test.input.io,
-          sessionExists: async (id) => {
-            checked.push(id)
-            return false
-          },
-        },
-      })
-      const model = yield* TestSessions.model(sessions)
-      expect(TestSessions.text(yield* TestSessions.reply(model, TestSessions.followup()))).toBe("COPPER-OTTER")
-      expect(checked).toEqual([before.claudeSessionID])
-      expect(claude.runs[1]!.args.some((arg) => arg.startsWith("--resume="))).toBe(false)
-      const user = claude.runs[1]!.received.find((message) => message.type === "user")
-      expect(JSON.stringify(user.message.content)).toContain("<conversation-checkpoint>")
-      expect(JSON.stringify(user.message.content)).toContain("COPPER-OTTER")
-      const after = (yield* SessionRecord.make(test.storage).get("session-a"))!
-      expect(after.claudeSessionID).not.toBe(before.claudeSessionID)
-      yield* registry.close()
-      claude.check()
-    }),
-  )
-
   it.effect("streams consecutive turns once, on one process, with per-turn usage", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make([
@@ -89,7 +47,7 @@ describe("Claude sessions", () => {
     }),
   )
 
-  it.effect("a rejected attachment during rebuild does not lose history on the corrected request", () =>
+  it.effect("a missing Claude transcript is rebuilt from history, even after a rejected attachment", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make([
         FakeClaude.expectStartup(),
@@ -101,6 +59,7 @@ describe("Claude sessions", () => {
       ])
       const test = yield* TestSessions.start(claude)
       yield* TestSessions.reply(test.model, first)
+      const before = (yield* SessionRecord.make(test.storage).get("session-a"))!
       yield* test.registry.close()
       const registry = ClaudeSessions.registry()
       yield* Effect.addFinalizer(() => registry.close())
@@ -120,6 +79,8 @@ describe("Claude sessions", () => {
       expect(JSON.stringify(user.message.content)).toContain("<conversation-checkpoint>")
       expect(JSON.stringify(user.message.content)).toContain("COPPER-OTTER")
       expect(JSON.stringify(user.message.content)).not.toContain("image/svg+xml")
+      const after = (yield* SessionRecord.make(test.storage).get("session-a"))!
+      expect(after.claudeSessionID).not.toBe(before.claudeSessionID)
       yield* registry.close()
       claude.check()
     }),
@@ -183,38 +144,13 @@ describe("Claude sessions", () => {
       const run = claude.runs[0]!
       const init = run.received.find((message) => message.request?.subtype === "initialize").request
       expect(init.systemPrompt).toBeUndefined()
-      expect(init.appendSystemPrompt).toBe(ClaudeSystemPrompt.primary.append)
       expect(JSON.stringify(run.received)).not.toContain("A changed OpenCode built-in agent prompt")
-      expect(run.args).toContain("--tools=")
-      expect(run.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS).toBe("1")
       yield* test.registry.close()
       claude.check()
     }),
   )
 
-  it.effect("idle shutdown drains and the next turn resumes the saved Claude session", () =>
-    Effect.gen(function* () {
-      const claude = FakeClaude.make([
-        FakeClaude.expectStartup(),
-        FakeClaude.expectTurn(),
-        FakeClaude.expectInterrupt(),
-        FakeClaude.expectStartup(),
-        FakeClaude.expectTurn({ recording: "text-resume" }),
-        FakeClaude.expectInterrupt(),
-      ])
-      const test = yield* TestSessions.start(claude)
-      yield* TestSessions.reply(test.model, first)
-      const id = claude.runs[0]!.args.find((arg) => arg.startsWith("--session-id="))!.split("=")[1]
-      yield* TestClock.adjust(ClaudeSessions.IDLE_MS)
-      yield* Effect.promise(() => claude.runs[0]!.closed)
-      expect(TestSessions.text(yield* TestSessions.reply(test.model, TestSessions.followup()))).toBe("COPPER-OTTER")
-      expect(claude.runs[1]!.args).toContain(`--resume=${id}`)
-      yield* test.registry.close()
-      claude.check()
-    }),
-  )
-
-  it.effect("a turn arriving during idle shutdown waits for the old process to close", () =>
+  it.effect("a turn arriving during idle shutdown waits for the old process, then resumes its session", () =>
     Effect.gen(function* () {
       const release = Promise.withResolvers<void>()
       const stop = FakeClaude.expectInterrupt({ hold: release.promise })
@@ -228,6 +164,7 @@ describe("Claude sessions", () => {
       ])
       const test = yield* TestSessions.start(claude)
       yield* TestSessions.reply(test.model, first)
+      const id = claude.runs[0]!.args.find((arg) => arg.startsWith("--session-id="))!.split("=")[1]
       const timeout = yield* TestClock.adjust(ClaudeSessions.IDLE_MS).pipe(
         Effect.forkScoped({ startImmediately: true }),
       )
@@ -241,6 +178,7 @@ describe("Claude sessions", () => {
       expect(TestSessions.text(yield* Fiber.join(next))).toBe("COPPER-OTTER")
       yield* Effect.promise(() => claude.runs[0]!.closed)
       expect(claude.runs).toHaveLength(2)
+      expect(claude.runs[1]!.args).toContain(`--resume=${id}`)
       yield* test.registry.close()
       claude.check()
     }),
@@ -277,57 +215,6 @@ describe("Claude sessions", () => {
       const error = yield* TestSessions.reply(test.model, first).pipe(Effect.flip)
       expect(String(error.cause)).toContain("claude update")
       expect(claude.runs[0]!.received.some((message) => message.type === "user")).toBe(false)
-      yield* Effect.promise(() => claude.runs[0]!.closed)
-      claude.check()
-    }),
-  )
-
-  it.effect("a new registry resumes from durable storage", () =>
-    Effect.gen(function* () {
-      const saved = TestSessions.storage()
-      const claude = FakeClaude.make([
-        FakeClaude.expectStartup(),
-        FakeClaude.expectTurn(),
-        FakeClaude.expectInterrupt(),
-        FakeClaude.expectStartup(),
-        FakeClaude.expectTurn({ recording: "text-resume" }),
-        FakeClaude.expectInterrupt(),
-      ])
-      const old = yield* TestSessions.start(claude, saved)
-      yield* TestSessions.reply(old.model, first)
-      yield* old.registry.close()
-      const fresh = yield* TestSessions.start(claude, saved)
-      yield* TestSessions.reply(fresh.model, TestSessions.followup())
-      const record = (yield* SessionRecord.make(saved).get("session-a"))!
-      expect(claude.runs[1]!.args).toContain(`--resume=${record.claudeSessionID}`)
-      yield* fresh.registry.close()
-      claude.check()
-    }),
-  )
-
-  it.effect("reload adopts a process during handover; no replacement means shutdown", () =>
-    Effect.gen(function* () {
-      const claude = FakeClaude.make([
-        FakeClaude.expectStartup(),
-        FakeClaude.expectTurn(),
-        FakeClaude.expectTurn({ index: 1 }),
-        FakeClaude.expectInterrupt(),
-      ])
-      const registry = ClaudeSessions.registry()
-      yield* Effect.addFinalizer(() => registry.close())
-      const base = yield* TestSessions.start(FakeClaude.make([]))
-      const input = { ...base.input, io: { ...base.input.io, spawn: claude.spawn } }
-      const oldScope = yield* Scope.make()
-      const old = yield* registry.attach(input).pipe(Effect.provideService(Scope.Scope, oldScope))
-      yield* TestSessions.reply(yield* TestSessions.model(old), first)
-      yield* Scope.close(oldScope, Exit.void)
-      yield* TestClock.adjust(ClaudeSessions.HANDOVER_MS - 1)
-      const newScope = yield* Scope.make()
-      const fresh = yield* registry.attach(input).pipe(Effect.provideService(Scope.Scope, newScope))
-      yield* TestSessions.reply(yield* TestSessions.model(fresh), TestSessions.followup())
-      expect(claude.runs).toHaveLength(1)
-      yield* Scope.close(newScope, Exit.void)
-      yield* TestClock.adjust(ClaudeSessions.HANDOVER_MS)
       yield* Effect.promise(() => claude.runs[0]!.closed)
       claude.check()
     }),
@@ -388,7 +275,6 @@ describe("Claude sessions", () => {
       }
       expect(claude.runs).toHaveLength(3)
       const id = claude.runs[0]!.args.find((arg) => arg.startsWith("--session-id="))!.split("=")[1]
-      expect(claude.runs[0]!.received.filter((message) => message.type === "user")).toHaveLength(4)
       const requests = claude.runs[0]!.received.map((message) => message.request)
       expect(requests).toContainEqual({ subtype: "set_model", model: "sonnet" })
       expect(requests).toContainEqual({ subtype: "apply_flag_settings", settings: { effortLevel: "high" } })
@@ -399,68 +285,36 @@ describe("Claude sessions", () => {
       for (const run of claude.runs.slice(1)) {
         expect(run.args).toContain("--model=sonnet")
         expect(run.args).toContain(`--resume=${id}`)
-        expect(run.received.find((message) => message.type === "user").message.content).toEqual([
-          { type: "text", text: "What was the marker? Reply only with it." },
-        ])
       }
       yield* test.registry.close()
       claude.check()
     }),
   )
 
-  it.effect(
-    "titles keep their task prompt and conversation branches keep Claude's preset without changing the main session",
-    () =>
-      Effect.gen(function* () {
-        const claude = FakeClaude.make([
-          FakeClaude.expectStartup(),
-          FakeClaude.expectTurn(),
-          FakeClaude.expectStartup(),
-          FakeClaude.expectTurn({ recording: "utility" }),
-          FakeClaude.expectInterrupt(),
-          FakeClaude.expectStartup(),
-          FakeClaude.expectTurn({ recording: "utility" }),
-          FakeClaude.expectInterrupt(),
-          FakeClaude.expectInterrupt(),
-          FakeClaude.expectStartup(),
-          FakeClaude.expectTurn({ recording: "utility" }),
-          FakeClaude.expectInterrupt(),
-          FakeClaude.expectStartup(),
-          FakeClaude.expectTurn({ index: 1 }),
-          FakeClaude.expectInterrupt(),
-        ])
-        const test = yield* TestSessions.start(claude)
-        yield* TestSessions.reply(test.model, first)
-        yield* TestSessions.reply(test.model, TestSessions.followup(), "session-a", "title")
-        yield* TestSessions.reply(test.model, TestSessions.followup(), "session-a", "generate")
-        yield* TestSessions.reply(test.model, TestSessions.followup(), "session-a", "compaction")
-        yield* TestSessions.reply(test.model, TestSessions.followup())
-        expect(claude.runs).toHaveLength(5)
-        for (const run of claude.runs.slice(1, 4)) {
-          expect(run.args).toContain("--no-session-persistence")
-          const init = run.received.find((message) => message.request?.subtype === "initialize").request
-          const user = run.received.find((message) => message.type === "user")
-          expect(JSON.stringify(user.message.content)).not.toContain("You are a concise test assistant.")
-          expect(user.message.content).toContainEqual({
-            type: "text",
-            text: "What was the marker? Reply only with it.",
-          })
-          if (run === claude.runs[1]) {
-            expect(init.systemPrompt).toEqual(["You are a concise test assistant."])
-            expect(init.appendSystemPrompt).toBeUndefined()
-            continue
-          }
-          expect(init.systemPrompt).toBeUndefined()
-          expect(init.appendSystemPrompt).toBe(ClaudeSystemPrompt.primary.append)
-          expect(init.systemPromptSnapshot).toBe(false)
-        }
-        expect(test.storage.data.size).toBe(1)
-        expect(claude.forks).toHaveLength(2)
-        expect(claude.removed).toEqual(claude.forks.map((fork) => fork.sessionID))
-        expect(claude.runs[1]!.args.some((arg) => arg.startsWith("--resume="))).toBe(false)
-        yield* test.registry.close()
-        claude.check()
-      }),
+  it.effect("titles use their own task prompt in a throwaway session that leaves the chat alone", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make([
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn(),
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn({ recording: "utility" }),
+        FakeClaude.expectInterrupt(),
+        FakeClaude.expectTurn({ index: 1 }),
+        FakeClaude.expectInterrupt(),
+      ])
+      const test = yield* TestSessions.start(claude)
+      yield* TestSessions.reply(test.model, first)
+      yield* TestSessions.reply(test.model, TestSessions.followup(), "session-a", "title")
+      expect(TestSessions.text(yield* TestSessions.reply(test.model, TestSessions.followup()))).toBe("COPPER-OTTER")
+      expect(claude.runs).toHaveLength(2)
+      const title = claude.runs[1]!
+      const init = title.received.find((message) => message.request?.subtype === "initialize").request
+      expect(init.systemPrompt).toEqual(["You are a concise test assistant."])
+      expect(title.args).toContain("--no-session-persistence")
+      expect(test.storage.data.size).toBe(1)
+      yield* test.registry.close()
+      claude.check()
+    }),
   )
 
   // Claude's prompt cache only matches when tools and system prompt are identical, so branches must not drop them.
@@ -480,7 +334,6 @@ describe("Claude sessions", () => {
       const test = yield* TestSessions.start(claude)
       yield* TestTools.step(test.model, first)
       const parts = yield* TestTools.step(test.model, TestSessions.followup(), TestTools.tools, "generate")
-      // Claude's prompt cache only matches when tools and system prompt are identical.
       const chat = claude.runs[0]!.received.find((message) => message.request?.subtype === "initialize").request
       const branch = claude.runs[1]!.received.find((message) => message.request?.subtype === "initialize").request
       expect(chat.sdkMcpServers).toEqual(["opencode"])

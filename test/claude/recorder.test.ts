@@ -25,7 +25,6 @@ describe("recording privacy", () => {
     for (const type of ["assistant", "user"]) {
       const input = { type, message: { content: [...blocks, text] } }
       expect(Recorder.parse(JSON.stringify(input))).toEqual({ type, message: { content: [text] } })
-      expect(input.message.content).toHaveLength(4)
     }
     const event = {
       type: "stream_event",

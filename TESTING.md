@@ -18,7 +18,6 @@ Commands:
 - `bun test`: levels 1 to 3. Runs in CI.
 - `bun run test:live`: level 4. Needs `CLAUDE_LIVE=1` and a logged-in `claude`. Never runs in CI.
 - `RECORD=1 bun run test:live`: level 4, saving new recordings.
-- `CLAUDE_PROMPT_MATRIX=1 bun test test/live/prompts.test.ts`: opt-in prompt compatibility experiments, including a real SDK MCP call. Uses subscription auth; separate from the normal live suite.
 
 ## Why fake the `claude` program
 
@@ -172,7 +171,7 @@ Typecheck, all 63 offline tests and all 11 affected live chat/tool tests passed.
 - Pure tests select only matching historical checkpoints with no outstanding tool calls, including multiple tool calls whose results arrive separately. The current user group stays outside the fork, including when it matches the first or a later turn being retried.
 - `test/claude/branches.test.ts` checks undo with unchanged resubmitted input, repeated undo with remapped UUIDs, source lookup after registry reload, missing-transcript fallback, independent concurrent generate calls and cancellation, cleanup after a real recorded API failure, and compaction while a tool handler waits. A terminal-result gate proves compaction cannot fork before the old turn drains. The next primary request contains only the compacted history.
 - `test/opencode/branches.test.ts` exercises native `session.fork` and `session.revert` against the real host and verifies source history is unchanged. It also exercises native compaction, verifies the preset/task-input split, accepts OpenCode's required summary format, and starts the next primary request with that summary in a fresh Claude session. The context-edit test verifies that stale replies are excluded from the branch.
-- `test/live/branches.test.ts` has separate native fork/undo, unchanged-prompt resubmission, concurrent generate, and compaction cases. Each deletes only its own Claude transcripts. `branches.jsonl`, `branch-resubmit.jsonl`, `branch-generate.jsonl` and `branch-compaction.jsonl` record the successful paths. `branch-error.jsonl` preserves the earlier failed compaction request and checks cleanup/recovery rather than pretending it is a successful summary.
+- `test/live/branches.test.ts` has separate native fork/undo, concurrent generate, and compaction cases. Each deletes only its own Claude transcripts. `branches.jsonl`, `branch-generate.jsonl` and `branch-compaction.jsonl` record the successful paths. `branch-error.jsonl` preserves the earlier failed compaction request and checks cleanup/recovery rather than pretending it is a successful summary.
 - A direct SDK probe confirmed that forks copy the requested prefix with fresh UUIDs, and a resumed branch with custom `systemPrompt` and `snapshot: false` follows its own task instructions.
 
 #### Side-call rejection: comparison and resolution
@@ -229,10 +228,6 @@ Verification: typecheck, all **79 offline tests**, live instructions (six calls)
 
 ### System-prompt compatibility
 
-`test/live/prompts.test.ts` tests the actual plugin isolation settings with Claude Code's preset and representative additions: tool routing, Code Mode, MCP notes, skills, a custom role, AGENTS.md instructions, all additions together, and a large project appendix. One case registers SDK MCP tools and requires a real tool call. These isolated fixture tools test SDK prompt compatibility; the OpenCode tool bridge has separate coverage.
-
-Controls try a short custom prompt and OpenCode's base prompt as a replacement and an append. `test/fixtures/opencode-system.txt` snapshots `packages/core/src/session/runner/prompt/system.txt` at OpenCode commit `0a03b4bc9c401330888513d612252350944df33c`, with its tool-guidance placeholder resolved. It is not the complete dynamically assembled TUI prompt. Control failures are reported, rather than failing the supported preset configuration tests.
-
 An earlier TUI run received `400 Third-party apps now draw from your extra usage, not your plan limits`. On 2026-10-16, both an exploratory 11-case matrix and this checked-in 12-case matrix passed on Claude Code 2.1.301 / SDK 0.3.301 / Haiku with subscription auth. They covered all planned instruction categories, a roughly 65 KB appendix, both OpenCode base-prompt controls, and (in the second matrix) an actual SDK MCP call. The original rejection was not reproduced; these results do not establish its cause or guarantee every future prompt will work.
 
 Source review:
@@ -245,7 +240,7 @@ Source review:
 
 `RECORD=1` wraps the real spawn function and saves filtered traffic in both directions, one file per scenario in `test/recordings/` (`test/lib/recorder.ts`). Never save thinking or reasoning content, signatures, or redacted thinking in fixtures or diagnostics. The recorder removes these before retaining a captured message. The live reasoning check uses no recorder and disables transcript persistence. The start-up recordings (`startup`, `startup-logged-out`) come from a login check run on its own, so each file holds one complete `claude` run.
 
-The chat recordings are `text` (two turns), `text-resume`, `text-cancel` (interrupt then recovery), `attachments` and `utility` (side-call instructions). Each is one complete process. Chat recordings use the Claude Code preset and OpenCode runtime note; `utility` preserves the supplied task system prompt. The live test regenerates these through the plugin model itself. Run recording and offline tests sequentially, since recording replaces fixtures. Usage assertions compare converted counts with the recorded terminal result, so re-recording does not require copying token totals into test code.
+The chat recordings are `text` (two turns), `text-resume`, `text-cancel` (interrupt then recovery) and `utility` (side-call instructions). Each is one complete process. Chat recordings use the Claude Code preset and OpenCode runtime note; `utility` preserves the supplied task system prompt. The live test regenerates these through the plugin model itself. Run recording and offline tests sequentially, since recording replaces fixtures. Usage assertions compare converted counts with the recorded terminal result, so re-recording does not require copying token totals into test code.
 
 - The first line of each file holds the Claude Code version, SDK version, model and date.
 - Before saving, personal details are replaced: account email, organization, user name and home folder paths.

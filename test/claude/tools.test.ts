@@ -47,7 +47,7 @@ describe("Claude tool steps", () => {
     }),
   )
 
-  it.effect("plugin handover keeps pending handlers and the next step on the same process", () =>
+  it.effect("plugin reload hands over the process with its pending handlers; without a reload it shuts down", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make(FakeClaude.replay("tools"))
       const base = yield* TestSessions.start(FakeClaude.make([]))
@@ -60,11 +60,16 @@ describe("Claude tool steps", () => {
       TestTools.append(prompt, yield* TestTools.step(yield* TestSessions.model(old), prompt), TestTools.output)
       yield* Scope.close(scope, Exit.void)
       yield* TestClock.adjust(ClaudeSessions.HANDOVER_MS - 1)
-      const fresh = yield* TestSessions.model(yield* registry.attach(input))
+      const next = yield* Scope.make()
+      const fresh = yield* TestSessions.model(
+        yield* registry.attach(input).pipe(Effect.provideService(Scope.Scope, next)),
+      )
       TestTools.append(prompt, yield* TestTools.step(fresh, prompt), TestTools.output)
       expect(TestSessions.text(yield* TestTools.step(fresh, prompt))).toBe("COPPER-OTTER")
       expect(claude.runs).toHaveLength(1)
-      yield* registry.close()
+      yield* Scope.close(next, Exit.void)
+      yield* TestClock.adjust(ClaudeSessions.HANDOVER_MS)
+      yield* Effect.promise(() => claude.runs[0]!.closed)
       claude.check()
     }),
   )
@@ -312,6 +317,54 @@ describe("Claude tool steps", () => {
       expect(TestSessions.text(yield* TestTools.step(test.model, prompt, changed))).toContain("DENIED-IBIS")
       expect(claude.runs).toHaveLength(2)
       expect(claude.runs[1]!.args.some((arg) => arg.startsWith("--resume="))).toBe(true)
+      yield* test.registry.close()
+      claude.check()
+    }),
+  )
+
+  it.effect("results that arrive with another model's reply finish the parked calls and pass that reply on", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make(FakeClaude.replay("tools-continue"))
+      const test = yield* TestSessions.start(claude)
+      const prompt = TestTools.prompt()
+      TestTools.append(prompt, yield* TestTools.step(test.model, prompt), TestTools.output)
+      prompt.push(
+        { role: "assistant", content: [{ type: "text", text: "NORMAL-IBIS" }] },
+        { role: "user", content: [{ type: "text", text: "Do not call tools. Reply CONTINUED-OTTER." }] },
+      )
+      yield* TestTools.step(test.model, prompt)
+      expect(claude.runs).toHaveLength(1)
+      const messages = claude.runs[0]!.received
+      const results = JSON.stringify(messages.filter((message) => message.response?.response?.mcp_response?.result))
+      expect(results).toContain("LILAC-HERON")
+      expect(results).toContain("LEMON-IBIS")
+      const user = messages.filter((message) => message.type === "user").at(-1)
+      expect(JSON.stringify(user.message.content)).toContain("NORMAL-IBIS")
+      yield* test.registry.close()
+      claude.check()
+    }),
+  )
+
+  it.effect("a last step without tools stops the parked turn and resumes with the saved result", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make(FakeClaude.replay("max-steps", { skipProbes: true }))
+      const test = yield* TestSessions.start(claude)
+      const lookup = [{ ...TestTools.tools[0]!, inputSchema: { type: "object" as const, properties: {} } }]
+      const prompt = TestSessions.prompt("Call lookup once, then call it again, then report the marker.")
+      TestTools.append(prompt, yield* TestTools.step(test.model, prompt, lookup), () => ({
+        type: "text",
+        value: "STEP-OTTER",
+      }))
+      prompt.push({ role: "user", content: [{ type: "text", text: "MAXIMUM STEPS REACHED. Respond with text only." }] })
+      yield* TestTools.step(test.model, prompt, [])
+      expect(claude.runs).toHaveLength(2)
+      const final = claude.runs[1]!
+      expect(final.args.some((arg) => arg.startsWith("--resume="))).toBe(true)
+      const init = final.received.find((message) => message.request?.subtype === "initialize").request
+      expect(init.sdkMcpServers).toBeUndefined()
+      expect(JSON.stringify(final.received.find((message) => message.type === "user").message.content)).toContain(
+        "STEP-OTTER",
+      )
       yield* test.registry.close()
       claude.check()
     }),

@@ -31,12 +31,13 @@ describe.skipIf(!live)("chat against real Claude", () => {
           }),
         )
 
-        const start = Effect.fn(function* (name: string) {
-          const recorder = Recorder.make(name)
+        // Without a name, the scenario runs against real Claude but is not recorded.
+        const start = Effect.fn(function* (name?: string) {
+          const recorder = name ? Recorder.make(name) : undefined
           const registry = ClaudeSessions.registry()
-          yield* Effect.addFinalizer(() => registry.close().pipe(Effect.andThen(Effect.sync(() => recorder.save()))))
+          yield* Effect.addFinalizer(() => registry.close().pipe(Effect.andThen(Effect.sync(() => recorder?.save()))))
           const sessions = yield* registry.attach({
-            io: { ...ClaudeIO.real, spawn: recorder.spawn },
+            io: { ...ClaudeIO.real, spawn: recorder?.spawn },
             status: yield* ClaudeStatus.make(ClaudeIO.real),
             storage,
             directory,
@@ -106,7 +107,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
         }).pipe(Effect.scoped)
 
         yield* Effect.gen(function* () {
-          const model = yield* start("attachments")
+          const model = yield* start()
           const image = yield* Effect.promise(() => Bun.file(new URL("../fixtures/red.png", import.meta.url)).bytes())
           const pdf = yield* Effect.promise(() => Bun.file(new URL("../fixtures/marker.pdf", import.meta.url)).bytes())
           const response = yield* reply(

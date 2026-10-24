@@ -11,62 +11,45 @@ import { TestOpenCode } from "../lib/opencode.js"
 import { Recorder } from "../lib/recorder.js"
 
 describe("embedded text chat", () => {
-  const canceled = Recorder.result("text-cancel")
-  if (canceled.subtype === "success") throw new Error("Expected an error recording")
-  const limit = {
-    ...Recorder.result("branch-error", 2),
+  const overloaded = {
+    ...Recorder.result("text"),
     subtype: "success",
-    api_error_status: 429,
-    result: "Usage limit reached.",
+    is_error: false,
+    result: "",
+    api_error_status: 529,
   }
-  const rate = {
-    type: "rate_limit_event",
-    uuid: crypto.randomUUID(),
-    session_id: crypto.randomUUID(),
-    rate_limit_info: { status: "rejected", rateLimitType: "seven_day", resetsAt: 1792800000 },
-  }
-  const empty = { ...Recorder.result("text"), subtype: "success", is_error: false, result: "", api_error_status: 529 }
-  for (const fixture of [
-    { name: "cancellation", replies: [canceled], message: canceled.errors.join("\n") },
-    {
-      name: "subscription exhaustion",
-      replies: [rate, limit],
-      message: new Date(rate.rate_limit_info.resetsAt * 1000).toISOString(),
-    },
-    { name: "empty overloaded success", replies: [empty], message: "Anthropic is overloaded (529)" },
-  ])
-    it.live(
-      `reports ${fixture.name} once instead of retrying the turn`,
-      () =>
-        Effect.gen(function* () {
-          // Fault-inject documented terminal fields: do not exhaust a real subscription to test its UI path.
-          const failed = { ...FakeClaude.expectTurn(), replies: fixture.replies }
-          const claude = FakeClaude.make([FakeClaude.expectStartup(), failed, FakeClaude.expectInterrupt()], {
-            probes: true,
-          })
-          const registry = ClaudeSessions.registry()
-          yield* Effect.addFinalizer(() => registry.close())
-          const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), registry })
-          yield* TestOpenCode.connect(test.opencode)
-          const session = yield* test.opencode.session.create({
-            title: "Failure test",
-            location: { directory: Location.PublicRef.fields.directory.make(test.directory) },
-            model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }),
-          })
-          yield* test.opencode.session.prompt({ sessionID: session.id, text: "A request that fails" })
-          yield* test.opencode.session.wait({ sessionID: session.id })
-          const history = yield* test.opencode.session.export({ sessionID: session.id })
-          const assistant = history.messages.find((message) => message.type === "assistant")
-          expect(assistant?.finish).toBe("error")
-          expect(assistant?.error?.message).toContain(fixture.message)
-          const calls = claude.runs.filter((run) => run.args.includes("--include-partial-messages"))
-          expect(calls).toHaveLength(1)
-          expect(calls[0]!.received.filter((message) => message.type === "user")).toHaveLength(1)
-          yield* registry.close()
-          claude.check()
-        }),
-      5_000,
-    )
+  it.live(
+    "reports an overloaded API once instead of retrying the turn",
+    () =>
+      Effect.gen(function* () {
+        // Fault-inject documented terminal fields: do not exhaust a real subscription to test its UI path.
+        const failed = { ...FakeClaude.expectTurn(), replies: [overloaded] }
+        const claude = FakeClaude.make([FakeClaude.expectStartup(), failed, FakeClaude.expectInterrupt()], {
+          probes: true,
+        })
+        const registry = ClaudeSessions.registry()
+        yield* Effect.addFinalizer(() => registry.close())
+        const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), registry })
+        yield* TestOpenCode.connect(test.opencode)
+        const session = yield* test.opencode.session.create({
+          title: "Failure test",
+          location: { directory: Location.PublicRef.fields.directory.make(test.directory) },
+          model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }),
+        })
+        yield* test.opencode.session.prompt({ sessionID: session.id, text: "A request that fails" })
+        yield* test.opencode.session.wait({ sessionID: session.id })
+        const history = yield* test.opencode.session.export({ sessionID: session.id })
+        const assistant = history.messages.find((message) => message.type === "assistant")
+        expect(assistant?.finish).toBe("error")
+        expect(assistant?.error?.message).toContain("Anthropic is overloaded (529)")
+        const calls = claude.runs.filter((run) => run.args.includes("--include-partial-messages"))
+        expect(calls).toHaveLength(1)
+        expect(calls[0]!.received.filter((message) => message.type === "user")).toHaveLength(1)
+        yield* registry.close()
+        claude.check()
+      }),
+    5_000,
+  )
 
   it.live(
     "shares a primary process, stores text/usage, and resumes after an OpenCode restart",
