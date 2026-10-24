@@ -4,6 +4,7 @@ import type { LanguageModelV3Prompt } from "@ai-sdk/provider"
 import { Effect } from "effect"
 import { ClaudeIO } from "../../src/claude/io.js"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
+import { ClaudeStatus } from "../../src/claude/status.js"
 import { SessionRecord } from "../../src/sync/record.js"
 import { it } from "../lib/effect.js"
 import { Recorder } from "../lib/recorder.js"
@@ -36,6 +37,7 @@ describe.skipIf(!live)("history sync against real Claude", () => {
         )
         const sessions = yield* registry.attach({
           io: { ...ClaudeIO.real, spawn: recorder.spawn },
+          status: yield* ClaudeStatus.make(ClaudeIO.real),
           storage,
           directory,
         })

@@ -4,6 +4,7 @@ import type { LanguageModelV3FunctionTool } from "@ai-sdk/provider"
 import { Effect } from "effect"
 import { ClaudeIO } from "../../src/claude/io.js"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
+import { ClaudeStatus } from "../../src/claude/status.js"
 import { it } from "../lib/effect.js"
 import { Recorder } from "../lib/recorder.js"
 import { TestOpenCode } from "../lib/opencode.js"
@@ -31,6 +32,7 @@ const setup = Effect.fn(function* (name: string, capture = false) {
   )
   const sessions = yield* registry.attach({
     io: { ...ClaudeIO.real, spawn: recorder.spawn },
+    status: yield* ClaudeStatus.make(ClaudeIO.real),
     storage,
     directory,
   })

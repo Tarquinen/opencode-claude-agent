@@ -293,9 +293,10 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | Case | Level | Phase |
 |---|---|---|
 | The start-up flags and environment turn off everything listed in PLAN.md | 2 | 1 |
-| Models show from the built-in list until the login check finishes, then from claude's list, with effort variants, Haiku's family, attachment support and empty cost | 3 | 1 |
-| Saved models are restored after an opencode restart, before the next login check finishes | 3 | 1 |
-| Connecting after the login check shows its result (logged out → sign-in problem), and checks again | 3 | 1 |
+| Startup lists no models and runs no `claude`; connecting fills the list from claude, with effort variants, Haiku's family, attachment support and empty cost | 3 | 1 |
+| Saved models are restored after an opencode restart without running `claude` | 3 | 1 |
+| Connecting without claude installed shows a sign-in problem, and the next start checks again | 3 | 1 |
+| A chat's startup reports the login and models it found | 2 | 1 |
 | Startup and reconnect checks run in order, so an older account snapshot cannot overwrite the new login | 2 | 1 |
 | Installing claude after startup is picked up by the next login check | 2 | 1 |
 | A failed startup is reported and the next check can recover; a stuck startup times out and closes its process | 2 | 1 |

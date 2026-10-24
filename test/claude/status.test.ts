@@ -5,6 +5,7 @@ import { ClaudeStatus } from "../../src/claude/status.js"
 import { it } from "../lib/effect.js"
 import { FakeClaude } from "../lib/fake-claude.js"
 import { FakeIO } from "../lib/fake-io.js"
+import { TestSessions } from "../lib/sessions.js"
 
 describe("login status", () => {
   it.effect("finds claude when it is installed after the plugin starts", () =>
@@ -61,6 +62,25 @@ describe("login status", () => {
 
       yield* status.refresh()
       expect((yield* SubscriptionRef.get(status.state)).type).toBe("ready")
+      claude.check()
+    }),
+  )
+
+  it.effect("a chat's startup reports the login and models it found", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make([
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn(),
+        FakeClaude.expectInterrupt(),
+      ])
+      const test = yield* TestSessions.start(claude)
+
+      yield* TestSessions.reply(test.model, TestSessions.prompt("hello"))
+      const state = yield* SubscriptionRef.get(test.input.status.state)
+      expect(state.type).toBe("ready")
+      if (state.type !== "ready") throw new Error("the chat did not report its startup")
+      expect(state.probe.models.length).toBeGreaterThan(0)
+      yield* test.registry.close()
       claude.check()
     }),
   )

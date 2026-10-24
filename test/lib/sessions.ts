@@ -5,6 +5,7 @@ import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import { Effect } from "effect"
 import type { ClaudeSession } from "../../src/claude/session.js"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
+import { ClaudeStatus } from "../../src/claude/status.js"
 import { ClaudeAgentLanguageModel } from "../../src/language-model/claude-agent-language-model.js"
 import { RequestKind } from "../../src/language-model/request-kind.js"
 import type { SessionRecord } from "../../src/sync/record.js"
@@ -51,7 +52,8 @@ export const model = Effect.fn(function* (sessions: ClaudeSessions.Interface) {
 export const start = Effect.fn(function* (claude: FakeClaude.Fake, saved = storage()) {
   const registry = ClaudeSessions.registry()
   yield* Effect.addFinalizer(() => registry.close())
-  const input = { io: FakeIO.make({ claude }), storage: saved, directory: "/tmp/opencode" }
+  const io = FakeIO.make({ claude })
+  const input = { io, status: yield* ClaudeStatus.make(io), storage: saved, directory: "/tmp/opencode" }
   const sessions = yield* registry.attach(input)
   return { registry, input, model: yield* model(sessions), storage: saved }
 })

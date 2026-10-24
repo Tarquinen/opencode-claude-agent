@@ -32,10 +32,11 @@ export function start(options: Options) {
   let failure: unknown
   let stopping: Promise<void> | undefined
   let persisted = false
-  const ready = session.initializationResult().then((init) => {
+  const ready = session.initializationResult().then((init): ClaudeProbe.Result => {
     const error = ClaudeProbe.versionError(init.claude_code_version)
     if (error) throw error
     initialized = true
+    return { version: init.claude_code_version!, account: init.account, models: init.models }
   })
 
   function finishTurn() {

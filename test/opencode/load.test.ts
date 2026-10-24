@@ -11,22 +11,18 @@ import { TestOpenCode } from "../lib/opencode.js"
 import { Recorder } from "../lib/recorder.js"
 
 describe("loading the plugin", () => {
-  it.live("models show from the built-in list until the login check finishes, then from claude", () =>
+  it.live("starts without models or a claude run, and connecting fills the list from claude", () =>
     Effect.gen(function* () {
-      // Both checks wait: the one at start-up, and the one connecting starts
-      const hold = Promise.withResolvers<void>()
-      const atStart = FakeClaude.expectStartup({ hold: hold.promise })
-      const onConnect = FakeClaude.expectStartup({ hold: hold.promise })
-      const claude = FakeClaude.make([atStart, onConnect])
+      const onConnect = FakeClaude.expectStartup()
+      const claude = FakeClaude.make([onConnect])
       const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }) })
 
       expect(yield* TestOpenCode.models(test.opencode)).toEqual([])
-      yield* TestOpenCode.connect(test.opencode)
-      expect(yield* TestOpenCode.models(test.opencode)).toEqual(["opus", "sonnet", "haiku"])
+      expect(claude.runs).toHaveLength(0)
 
-      hold.resolve()
+      yield* TestOpenCode.connect(test.opencode)
       yield* Effect.promise(() => claude.reached(onConnect))
-      const ids = yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.length > 3)
+      const ids = yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.length > 0)
       const startup: SDKControlInitializeResponse = Recorder.startupReply(Recorder.load("startup"))
       const recorded = startup.models.filter((model) => model.value !== "default").map((model) => model.value)
       expect(ids).toEqual(recorded)
@@ -49,79 +45,56 @@ describe("loading the plugin", () => {
     }),
   )
 
-  it.live("restores the saved models before the next startup check finishes", () =>
+  it.live("restarts with the saved models without running claude", () =>
     Effect.gen(function* () {
       const directory = yield* TestOpenCode.tempDirectory
       const database = path.join(directory, "opencode.db")
       const saved = yield* Effect.gen(function* () {
-        const atStart = FakeClaude.expectStartup()
         const onConnect = FakeClaude.expectStartup()
-        const claude = FakeClaude.make([atStart, onConnect])
+        const claude = FakeClaude.make([onConnect])
         const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), directory, database })
         yield* TestOpenCode.connect(test.opencode)
         yield* Effect.promise(() => claude.reached(onConnect))
-        const ids = yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.length > 3)
+        const ids = yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.length > 0)
         claude.check()
         return ids
       }).pipe(Effect.scoped)
 
-      const hold = Promise.withResolvers<void>()
-      const startup = FakeClaude.expectStartup({ hold: hold.promise })
-      const claude = FakeClaude.make([startup])
+      const claude = FakeClaude.make([])
       const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), directory, database })
-      yield* Effect.promise(() => claude.started(startup))
       expect(yield* TestOpenCode.models(test.opencode)).toEqual(saved)
       const models = yield* test.opencode.model.list()
       expect(
         models.data.find((model) => model.providerID === ClaudeProvider.ID && model.id === "opus")?.limit.context,
       ).toBe(1_000_000)
-
-      hold.resolve()
-      yield* Effect.promise(() => claude.reached(startup))
-      claude.check()
+      expect(claude.runs).toHaveLength(0)
     }),
   )
 
-  it.live("connecting after the login check shows its result, and checks again", () =>
+  it.live("connecting without claude installed shows a problem, and the next start checks again", () =>
     Effect.gen(function* () {
-      const atStart = FakeClaude.expectStartup({ recording: "startup-logged-out" })
-      const onConnect = FakeClaude.expectStartup({ recording: "startup-logged-out" })
-      const claude = FakeClaude.make([atStart, onConnect])
-      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }) })
+      const directory = yield* TestOpenCode.tempDirectory
+      const database = path.join(directory, "opencode.db")
+      yield* Effect.gen(function* () {
+        const claude = FakeClaude.make([])
+        const io = { ...FakeIO.make({ claude }), which: () => undefined }
+        const test = yield* TestOpenCode.start({ io, directory, database })
+        yield* TestOpenCode.connect(test.opencode)
+        const connection = yield* TestOpenCode.waitUntil(
+          TestOpenCode.connection(test.opencode),
+          (connection) => connection?.status !== undefined,
+        )
+        expect(connection?.status?.status).toBe("needs_auth")
+        expect(yield* TestOpenCode.models(test.opencode)).toEqual([])
+      }).pipe(Effect.scoped)
+
+      // The user installed claude and restarted. With no saved models, opencode checks once at startup.
+      const atStart = FakeClaude.expectStartup()
+      const claude = FakeClaude.make([atStart])
+      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), directory, database })
       yield* Effect.promise(() => claude.reached(atStart))
-
-      yield* TestOpenCode.connect(test.opencode)
-      yield* Effect.promise(() => claude.reached(onConnect))
-      const connection = yield* TestOpenCode.waitUntil(
-        TestOpenCode.connection(test.opencode),
-        (connection) => connection?.status !== undefined,
-      )
-      expect(connection?.status?.status).toBe("needs_auth")
-      expect(connection?.status?.message).toContain("claude auth login")
-      claude.check()
-    }),
-  )
-
-  it.live("opencode calls our model through the placeholder package", () =>
-    Effect.gen(function* () {
-      const onConnect = FakeClaude.expectStartup()
-      // Generate loads its location's plugin instance as well as the server-level provider catalog.
-      const claude = FakeClaude.make([
-        FakeClaude.expectStartup(),
-        onConnect,
-        FakeClaude.expectStartup(),
-        FakeClaude.expectStartup(),
-        FakeClaude.expectTurn(),
-        FakeClaude.expectInterrupt(),
-      ])
-      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }) })
-      yield* TestOpenCode.connect(test.opencode)
-      yield* Effect.promise(() => claude.reached(onConnect))
-      const result = yield* test.opencode.generate.text({
-        prompt: "hello",
-        model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("sonnet") }),
-      })
-      expect(result.text).toBe("COPPER-OTTER")
+      yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.length > 0)
+      expect((yield* TestOpenCode.connection(test.opencode))?.status).toBeUndefined()
       claude.check()
     }),
   )

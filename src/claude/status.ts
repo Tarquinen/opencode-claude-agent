@@ -14,6 +14,8 @@ export type State =
 export interface Interface {
   readonly state: SubscriptionRef.SubscriptionRef<State>
   readonly refresh: () => Effect.Effect<void>
+  // What a chat's own process found when it started
+  readonly report: (next: State) => Effect.Effect<void>
 }
 
 export const make = Effect.fn("ClaudeStatus.make")(function* (io: ClaudeIO.Interface) {
@@ -35,6 +37,8 @@ export const make = Effect.fn("ClaudeStatus.make")(function* (io: ClaudeIO.Inter
     yield* SubscriptionRef.set(state, next)
   }, lock.withPermit)
 
-  const status: Interface = { state, refresh }
+  const report = (next: State) => SubscriptionRef.set(state, next)
+
+  const status: Interface = { state, refresh, report }
   return status
 })

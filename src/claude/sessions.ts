@@ -9,6 +9,7 @@ import type {
 } from "@ai-sdk/provider"
 import { Effect, Fiber, Semaphore } from "effect"
 import { ClaudeIO } from "./io.js"
+import type { ClaudeStatus } from "./status.js"
 import { ClaudeQueryOptions } from "./query-options.js"
 import { ClaudeSession } from "./session.js"
 import { SessionRecord } from "../sync/record.js"
@@ -124,6 +125,7 @@ export function registry() {
 
   const attach = Effect.fn("ClaudeSessions.attach")(function* (input: {
     readonly io: ClaudeIO.Interface
+    readonly status: ClaudeStatus.Interface
     readonly storage: SessionRecord.Storage
     readonly directory: string
   }) {
@@ -140,9 +142,13 @@ export function registry() {
     )
 
     const open = Effect.fn("ClaudeSessions.open")(function* (entry: Entry, request: Request) {
+      const starting = !entry.process
       if (!entry.process) {
         const executable = input.io.which()
-        if (!executable) return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
+        if (!executable) {
+          yield* input.status.report({ type: "missing" })
+          return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
+        }
         const pending = PendingTools.make()
         const session = yield* attemptSync(() =>
           ClaudeSession.start(
@@ -164,11 +170,13 @@ export function registry() {
         entry.process = { session, pending, model: request.model, effort: request.effort, launch: launch(request) }
       }
       const process = entry.process
-      yield* attempt(() => process.session.ready).pipe(
+      const probe = yield* attempt(() => process.session.ready).pipe(
         Effect.timeout("30 seconds"),
         Effect.mapError((error) => new Error(String(error))),
         Effect.onError(() => stop(entry).pipe(Effect.ignore)),
       )
+      // A new process reports its version, login and models, which keeps the model list current without a separate check.
+      if (starting) yield* input.status.report({ type: "ready", probe })
       // Apply controls before sending input or releasing parked tool results.
       if (process.model !== request.model) {
         yield* attempt(() => process.session.setModel(request.model))

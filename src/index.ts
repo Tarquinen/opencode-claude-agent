@@ -18,13 +18,12 @@ export const make = (io: ClaudeIO.Interface, registry = ClaudeSessions.registry(
     id: ID,
     effect: Effect.fn("ClaudeAgent.Plugin")(function* (ctx) {
       const status = yield* ClaudeStatus.make(io)
-      const sessions = yield* registry.attach({ io, storage: ctx.storage, directory: ctx.location.directory })
+      const sessions = yield* registry.attach({ io, status, storage: ctx.storage, directory: ctx.location.directory })
       yield* ClaudeProvider.register(ctx, status)
       yield* ClaudeIntegration.register(ctx, status)
       yield* ClaudeAISDK.register(ctx, sessions)
       yield* ClaudeSessionHooks.register(ctx)
       yield* ClaudeInstructions.register(ctx)
-      yield* status.refresh().pipe(Effect.forkScoped)
     }),
   })
 

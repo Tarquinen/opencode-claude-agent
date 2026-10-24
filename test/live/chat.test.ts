@@ -5,6 +5,7 @@ import { Effect } from "effect"
 import type { LanguageModelV3Prompt } from "@ai-sdk/provider"
 import { ClaudeIO } from "../../src/claude/io.js"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
+import { ClaudeStatus } from "../../src/claude/status.js"
 import { ClaudeAgentLanguageModel } from "../../src/language-model/claude-agent-language-model.js"
 import { RequestKind } from "../../src/language-model/request-kind.js"
 import { it } from "../lib/effect.js"
@@ -36,6 +37,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
           yield* Effect.addFinalizer(() => registry.close().pipe(Effect.andThen(Effect.sync(() => recorder.save()))))
           const sessions = yield* registry.attach({
             io: { ...ClaudeIO.real, spawn: recorder.spawn },
+            status: yield* ClaudeStatus.make(ClaudeIO.real),
             storage,
             directory,
           })
@@ -141,6 +143,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
         yield* Effect.addFinalizer(() => registry.close().pipe(Effect.andThen(Effect.sync(() => recorder.save()))))
         const sessions = yield* registry.attach({
           io: { ...ClaudeIO.real, spawn: recorder.spawn },
+          status: yield* ClaudeStatus.make(ClaudeIO.real),
           storage: TestSessions.storage(),
           directory,
         })
@@ -183,7 +186,12 @@ describe.skipIf(!live)("chat against real Claude", () => {
         yield* test.opencode.model.list({ location: { directory } })
         const agent = yield* test.opencode.agent.get({ agentID: Agent.ID.make("title"), location: { directory } })
         expect(agent.data.system).toBeTruthy()
-        const sessions = yield* registry.attach({ io, storage: TestSessions.storage(), directory })
+        const sessions = yield* registry.attach({
+          io,
+          status: yield* ClaudeStatus.make(io),
+          storage: TestSessions.storage(),
+          directory,
+        })
         const parts = yield* TestSessions.reply(
           yield* TestSessions.model(sessions),
           [
@@ -222,7 +230,12 @@ describe.skipIf(!live)("chat against real Claude", () => {
         const storage = TestSessions.storage()
         const registry = ClaudeSessions.registry()
         yield* Effect.addFinalizer(() => registry.close())
-        const sessions = yield* registry.attach({ io: ClaudeIO.real, storage, directory })
+        const sessions = yield* registry.attach({
+          io: ClaudeIO.real,
+          status: yield* ClaudeStatus.make(ClaudeIO.real),
+          storage,
+          directory,
+        })
         const haiku = yield* TestSessions.model(sessions)
         const sonnet = new ClaudeAgentLanguageModel.Model("sonnet", haiku.dependencies)
         // No session ID: the SDK runs without persisting a transcript.

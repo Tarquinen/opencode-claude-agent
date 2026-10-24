@@ -9,7 +9,7 @@ import { SdkPlaceholder } from "../language-model/sdk-placeholder.js"
 
 export const ID = Provider.ID.make("claude-agent")
 
-// The model list we keep between starts, so models show before the login check finishes
+// The model list we keep between starts, so opencode can list models without running `claude`
 const CatalogModel = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -20,15 +20,9 @@ type CatalogModel = typeof CatalogModel.Type
 const Catalog = Schema.Array(CatalogModel)
 const CATALOG_KEY = "models"
 
-const FALLBACK: readonly CatalogModel[] = [
-  { id: "opus", name: "Opus", efforts: [] },
-  { id: "sonnet", name: "Sonnet", efforts: [] },
-  { id: "haiku", name: "Haiku", efforts: [] },
-]
-
 export const register = Effect.fn("ClaudeProvider.register")(function* (ctx: Context, status: ClaudeStatus.Interface) {
   const saved = Schema.decodeUnknownOption(Catalog)(yield* ctx.storage.get(CATALOG_KEY))
-  let catalog = Option.getOrElse(saved, () => FALLBACK)
+  let catalog = Option.getOrElse(saved, (): readonly CatalogModel[] => [])
 
   yield* ctx.provider.transform((editor) => {
     editor.add({
@@ -46,7 +40,7 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (ctx: Con
     Stream.runForEach((state) =>
       Effect.gen(function* () {
         if (state.type !== "ready") return
-        const next = fromClaude(state.probe.models)
+        const next = fromClaude(state.probe.models, catalog)
         if (JSON.stringify(next) === JSON.stringify(catalog)) return
         catalog = next
         yield* ctx.storage.set(CATALOG_KEY, catalog)
@@ -55,20 +49,29 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (ctx: Con
     ),
     Effect.forkScoped,
   )
+
+  // Without a saved list there is no model to pick, so the first message that would fill it can never be sent.
+  if (catalog.length === 0 && (yield* ctx.integration.connection.active(ID))) {
+    yield* status.refresh().pipe(Effect.forkScoped)
+  }
 })
 
-function fromClaude(models: readonly ClaudeProbe.Model[]): CatalogModel[] {
-  return (
-    models
-      // "default" follows Claude Code's own default, which can change under a running opencode session
-      .filter((model) => model.value !== "default")
-      .map((model) => ({
-        id: model.value,
-        name: model.displayName,
-        efforts: model.supportedEffortLevels ?? [],
-        contextWindow: model.contextWindow,
-      }))
-  )
+// Context windows only come from the full check, so a chat's startup report keeps the saved ones.
+function fromClaude(models: readonly ClaudeProbe.Model[], saved: readonly CatalogModel[]): CatalogModel[] {
+  const known = new Map<string, number | undefined>()
+  for (const model of saved) known.set(model.id, model.contextWindow)
+  const result: CatalogModel[] = []
+  for (const model of models) {
+    // "default" follows Claude Code's own default, which can change under a running opencode session
+    if (model.value === "default") continue
+    result.push({
+      id: model.value,
+      name: model.displayName,
+      efforts: model.supportedEffortLevels ?? [],
+      contextWindow: model.contextWindow ?? known.get(model.value),
+    })
+  }
+  return result
 }
 
 function toModel(model: CatalogModel): Model.Info {
