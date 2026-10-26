@@ -1,11 +1,13 @@
 export * as TestTools from "./tools.js"
 
 import type {
+  LanguageModelV3CallOptions,
   LanguageModelV3FunctionTool,
   LanguageModelV3Prompt,
   LanguageModelV3StreamPart,
   LanguageModelV3ToolResultPart,
 } from "@ai-sdk/provider"
+import type { SessionRequestKind } from "@opencode/plugin/effect/session"
 import { Effect } from "effect"
 import type { ClaudeAgentLanguageModel } from "../../src/language-model/claude-agent-language-model.js"
 import { RequestKind } from "../../src/language-model/request-kind.js"
@@ -54,17 +56,17 @@ export const park = Effect.fn(function* (io: ClaudeIO.Interface, directory: stri
   const pending = PendingTools.make()
   const entered = Promise.withResolvers<void>()
   const settled = Promise.withResolvers<void>()
-  const session = yield* Effect.promise(() =>
+  const session = yield* Effect.promise(async () =>
     ClaudeSession.start({
       ...ClaudeQueryOptions.base({ executable: io.which()!, io }),
       cwd: directory,
       model: "haiku",
       sessionId: crypto.randomUUID(),
       includePartialMessages: true,
-      systemPrompt: ClaudeSystemPrompt.make(prompt(), true),
+      systemPrompt: ClaudeSystemPrompt.make(prompt()),
       hooks: ToolHooks.make(pending),
       mcpServers: {
-        opencode: ToolServer.make(tools, {
+        opencode: await ToolServer.make(tools, {
           ...pending,
           async call(name) {
             const result = pending.call(name)
@@ -88,13 +90,15 @@ export const step = Effect.fn(function* (
   model: ClaudeAgentLanguageModel.Model,
   prompt: LanguageModelV3Prompt,
   offered = tools,
-  kind: RequestKind.Kind = "primary",
+  kind: SessionRequestKind = "primary",
+  providerOptions?: LanguageModelV3CallOptions["providerOptions"],
 ) {
   const result = yield* Effect.promise(() =>
     model.doStream({
       prompt,
       tools: offered,
       headers: { [RequestKind.SESSION_HEADER]: "session-a", [RequestKind.HEADER]: kind },
+      providerOptions,
     }),
   )
   const parts = yield* Effect.tryPromise(() => TestSessions.collect(result.stream))

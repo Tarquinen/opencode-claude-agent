@@ -1,5 +1,6 @@
 export * as PendingTools from "./pending.js"
 
+import type { CallToolResult } from "@modelcontextprotocol/server"
 import type { ToolResult } from "./result.js"
 
 interface Call {
@@ -7,9 +8,16 @@ interface Call {
   readonly result: PromiseWithResolvers<ToolResult.Result>
 }
 
-export type Interface = ReturnType<typeof make>
+export interface Interface {
+  readonly expect: (id: string, name: string) => void
+  readonly before: (id: string, name: string) => void
+  readonly call: (name: string) => Promise<CallToolResult>
+  readonly resolve: (id: string, result: ToolResult.Result) => void
+  readonly after: (id: string) => ToolResult.Result["replacement"]
+  readonly clear: () => void
+}
 
-export function make() {
+export function make(): Interface {
   const calls = new Map<string, Call>()
   const replacements = new Map<string, ToolResult.Result["replacement"]>()
   let next: string | undefined

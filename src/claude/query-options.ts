@@ -68,7 +68,7 @@ export function base(input: {
   }
 }
 
-export function session(input: {
+export async function session(input: {
   readonly executable: string
   readonly io: ClaudeIO.Interface
   readonly connection?: Readonly<Record<string, string>>
@@ -82,7 +82,7 @@ export function session(input: {
   // Side calls run without saving a transcript
   readonly persist: boolean
   readonly resume?: string
-}): Options {
+}): Promise<Options> {
   const options: Options = {
     ...base(input),
     cwd: input.directory,
@@ -97,7 +97,7 @@ export function session(input: {
   if (input.maxOutputTokens !== undefined) {
     options.env = { ...options.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(input.maxOutputTokens) }
   }
-  if (input.tools.length > 0) options.mcpServers = { opencode: ToolServer.make(input.tools, input.pending) }
+  if (input.tools.length > 0) options.mcpServers = { opencode: await ToolServer.make(input.tools, input.pending) }
   if (input.resume !== undefined) {
     options.resume = input.resume
     return options

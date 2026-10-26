@@ -20,7 +20,7 @@ export interface Interface {
 
 export const make = Effect.fn("ClaudeStatus.make")(function* (
   io: ClaudeIO.Interface,
-  connection: () => Effect.Effect<Record<string, string>> = () => Effect.succeed({}),
+  connection: () => Effect.Effect<Record<string, string>>,
 ) {
   const state = yield* SubscriptionRef.make<State>({ type: "checking" })
   const lock = yield* Semaphore.make(1)
@@ -43,6 +43,5 @@ export const make = Effect.fn("ClaudeStatus.make")(function* (
 
   const report = (next: State) => SubscriptionRef.set(state, next)
 
-  const status: Interface = { state, refresh, report }
-  return status
+  return { state, refresh, report } satisfies Interface
 })

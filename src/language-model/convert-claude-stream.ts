@@ -6,7 +6,7 @@ import { ClaudeUsage } from "./usage.js"
 import { ToolNames } from "../tools/names.js"
 import { ClaudeAgentError } from "./claude-agent-error.js"
 
-export function make(tools: readonly LanguageModelV3FunctionTool[] = []) {
+export function make(tools: readonly LanguageModelV3FunctionTool[]) {
   const usage = ClaudeUsage.make()
   const failure = ClaudeAgentError.make()
   const streamed = new Set<string>()

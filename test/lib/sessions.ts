@@ -2,6 +2,7 @@ export * as TestSessions from "./sessions.js"
 
 import type { LanguageModelV3Prompt, LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
+import type { SessionRequestKind } from "@opencode/plugin/effect/session"
 import { Effect } from "effect"
 import type { ClaudeSession } from "../../src/claude/session.js"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
@@ -53,7 +54,12 @@ export const start = Effect.fn(function* (claude: FakeClaude.Fake, saved = stora
   const registry = ClaudeSessions.registry()
   yield* Effect.addFinalizer(() => registry.close())
   const io = FakeIO.make({ claude })
-  const input = { io, status: yield* ClaudeStatus.make(io), storage: saved, directory: "/tmp/opencode" }
+  const input = {
+    io,
+    status: yield* ClaudeStatus.make(io, () => Effect.succeed({})),
+    storage: saved,
+    directory: "/tmp/opencode",
+  }
   const sessions = yield* registry.attach(input)
   return { registry, input, model: yield* model(sessions), storage: saved }
 })
@@ -71,7 +77,7 @@ export function stream(
   model: ClaudeAgentLanguageModel.Model,
   prompt: LanguageModelV3Prompt,
   sessionID = "session-a",
-  kind: RequestKind.Kind = "primary",
+  kind: SessionRequestKind = "primary",
 ) {
   return Effect.promise(() =>
     model.doStream({ prompt, headers: { [RequestKind.SESSION_HEADER]: sessionID, [RequestKind.HEADER]: kind } }),
@@ -95,7 +101,7 @@ export const reply = Effect.fn(function* (
   model: ClaudeAgentLanguageModel.Model,
   prompt: LanguageModelV3Prompt,
   sessionID = "session-a",
-  kind: RequestKind.Kind = "primary",
+  kind: SessionRequestKind = "primary",
 ) {
   const result = yield* stream(model, prompt, sessionID, kind)
   return yield* Effect.tryPromise(() => collect(result.stream))

@@ -131,13 +131,12 @@ export function expectTurn(input?: {
 
 export function expectInterrupt(input?: {
   readonly recording?: string
-  readonly index?: number
   readonly hold?: Promise<void>
   readonly beforeResult?: Promise<void>
 }): Input {
   return {
     type: "interrupt",
-    replies: recordedInput(input?.recording ?? "text", "interrupt", input?.index ?? 0),
+    replies: recordedInput(input?.recording ?? "text", "interrupt", 0),
     hold: input?.hold,
     beforeResult: input?.beforeResult,
     started: Promise.withResolvers<void>(),
@@ -145,7 +144,7 @@ export function expectInterrupt(input?: {
   }
 }
 
-export function replies(step: Input, requestID?: string) {
+function replies(step: Input, requestID?: string) {
   return step.replies.map((message) =>
     message.type === "control_response"
       ? { ...message, response: { ...message.response, request_id: requestID } }
@@ -154,7 +153,7 @@ export function replies(step: Input, requestID?: string) {
 }
 
 // A start-up reply from a recording, answering the request with the given ID
-export function startupResponse(requestID: string, reply: SDKControlInitializeResponse) {
+function startupResponse(requestID: string, reply: SDKControlInitializeResponse) {
   return {
     type: "control_response",
     response: { subtype: "success", request_id: requestID, response: reply },
@@ -181,8 +180,7 @@ function loadProbeControls() {
   return controls
 }
 
-// Also used by the executable fake
-export function probeResponse(message: any, model: string | undefined) {
+function probeResponse(message: any, model: string | undefined) {
   probeControls ??= loadProbeControls()
   const reply = probeControls.get(`${model}/${message.request?.subtype}`)
   if (!reply) return

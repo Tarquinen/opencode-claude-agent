@@ -38,7 +38,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
           yield* Effect.addFinalizer(() => registry.close().pipe(Effect.andThen(Effect.sync(() => recorder?.save()))))
           const sessions = yield* registry.attach({
             io: { ...ClaudeIO.real, spawn: recorder?.spawn },
-            status: yield* ClaudeStatus.make(ClaudeIO.real),
+            status: yield* ClaudeStatus.make(ClaudeIO.real, () => Effect.succeed({})),
             storage,
             directory,
           })
@@ -144,7 +144,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
         yield* Effect.addFinalizer(() => registry.close().pipe(Effect.andThen(Effect.sync(() => recorder.save()))))
         const sessions = yield* registry.attach({
           io: { ...ClaudeIO.real, spawn: recorder.spawn },
-          status: yield* ClaudeStatus.make(ClaudeIO.real),
+          status: yield* ClaudeStatus.make(ClaudeIO.real, () => Effect.succeed({})),
           storage: TestSessions.storage(),
           directory,
         })
@@ -189,7 +189,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
         expect(agent.data.system).toBeTruthy()
         const sessions = yield* registry.attach({
           io,
-          status: yield* ClaudeStatus.make(io),
+          status: yield* ClaudeStatus.make(io, () => Effect.succeed({})),
           storage: TestSessions.storage(),
           directory,
         })
@@ -233,7 +233,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
         yield* Effect.addFinalizer(() => registry.close())
         const sessions = yield* registry.attach({
           io: ClaudeIO.real,
-          status: yield* ClaudeStatus.make(ClaudeIO.real),
+          status: yield* ClaudeStatus.make(ClaudeIO.real, () => Effect.succeed({})),
           storage,
           directory,
         })

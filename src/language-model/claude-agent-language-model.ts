@@ -13,7 +13,7 @@ import { RequestKind } from "./request-kind.js"
 import { ClaudeSystemPrompt } from "./system-prompt.js"
 
 export interface Dependencies {
-  readonly run: (request: Parameters<ClaudeSessions.Interface["run"]>[0], signal: AbortSignal) => Promise<void>
+  readonly run: (request: ClaudeSessions.Request, signal: AbortSignal) => Promise<void>
 }
 
 export class Model implements LanguageModelV3 {
@@ -39,9 +39,9 @@ export class Model implements LanguageModelV3 {
         ? []
         : (options.tools ?? []).filter((tool): tool is LanguageModelV3FunctionTool => tool.type === "function")
     const convert = ConvertClaudeStream.make(tools)
-    const headers = new Headers(options.headers as HeadersInit)
-    const kind = headers.get(RequestKind.HEADER)
-    const session = headers.get(RequestKind.SESSION_HEADER) ?? undefined
+    const headers = options.headers ?? {}
+    const kind = headers[RequestKind.HEADER]
+    const session = headers[RequestKind.SESSION_HEADER]
     const settings = options.providerOptions?.["claude-agent"]
     const role = settings?.[ClaudeSystemPrompt.AGENT_OPTION]
     const agent = typeof role === "string" ? role : undefined
@@ -50,14 +50,12 @@ export class Model implements LanguageModelV3 {
     const branch = kind === "generate" || kind === "compaction"
     const sessionID = primary ? session : undefined
     // Conversation branches copy their source session and keep the Claude prompt. OpenCode supplies their task as user input.
-    const sourceID = primary ? (headers.get(RequestKind.FORK_HEADER) ?? undefined) : branch ? session : undefined
+    const sourceID = primary ? headers[RequestKind.FORK_HEADER] : branch ? session : undefined
     // Branches offer the chat's tools and system prompt so Claude reuses the chat's prompt cache.
     const offered = primary || branch ? tools : []
     // Titles are standalone tasks, so OpenCode's system prompt replaces Claude Code's.
     const system =
-      primary || branch
-        ? ClaudeSystemPrompt.make(options.prompt, offered.length > 0, agent)
-        : ClaudeSystemPrompt.utility(options.prompt)
+      primary || branch ? ClaudeSystemPrompt.make(options.prompt, agent) : ClaudeSystemPrompt.utility(options.prompt)
     let cancelled = false
     let task: Promise<void>
     const stream = new ReadableStream({

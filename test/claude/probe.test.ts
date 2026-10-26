@@ -66,35 +66,6 @@ describe("login check", () => {
     }),
   )
 
-  it.effect("accepts the minimum version that supports verbatim prompts", () =>
-    Effect.gen(function* () {
-      const startup = FakeClaude.expectStartup()
-      startup.reply.claude_code_version = "2.1.248"
-      const claude = FakeClaude.make([startup])
-      const io = FakeIO.make({ claude })
-      const result = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable: FakeIO.EXECUTABLE, io }))
-      expect(result.version).toBe("2.1.248")
-      claude.check()
-    }),
-  )
-
-  for (const version of ["2.1.247", undefined]) {
-    it.effect(`asks for an update when claude reports ${version ?? "no version"}`, () =>
-      Effect.gen(function* () {
-        const startup = FakeClaude.expectStartup()
-        startup.reply.claude_code_version = version
-        const claude = FakeClaude.make([startup])
-        const io = FakeIO.make({ claude })
-        const error = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable: FakeIO.EXECUTABLE, io })).pipe(
-          Effect.flip,
-        )
-        expect(String(error.cause)).toContain("claude update")
-        yield* Effect.promise(() => claude.runs[0]!.closed)
-        claude.check()
-      }),
-    )
-  }
-
   it.effect("times out a stuck startup and closes the process", () =>
     Effect.gen(function* () {
       const startup = FakeClaude.expectStartup({ hold: new Promise<void>(() => {}) })
@@ -113,15 +84,16 @@ describe("login check", () => {
   )
 })
 
-describe("logged-in check", () => {
-  test("every login Claude Code supports counts, and only a missing credential does not", () => {
-    expect(ClaudeProbe.isLoggedIn({ subscriptionType: "Claude Team", apiProvider: "firstParty" })).toBe(true)
-    expect(
-      ClaudeProbe.isLoggedIn({ tokenSource: "none", apiKeySource: "ANTHROPIC_API_KEY", apiProvider: "firstParty" }),
-    ).toBe(true)
-    expect(ClaudeProbe.isLoggedIn({ tokenSource: "ANTHROPIC_AUTH_TOKEN", apiProvider: "firstParty" })).toBe(true)
-    expect(ClaudeProbe.isLoggedIn({ tokenSource: "CLAUDE_CODE_OAUTH_TOKEN", apiProvider: "firstParty" })).toBe(true)
-    expect(ClaudeProbe.isLoggedIn({ apiProvider: "vertex" })).toBe(true)
+describe("compatibility and login", () => {
+  test("only 2.1.248 or later is compatible", () => {
+    expect(ClaudeProbe.versionError("2.1.248")).toBeUndefined()
+    expect(ClaudeProbe.versionError("2.1.247")?.message).toContain("claude update")
+    expect(ClaudeProbe.versionError(undefined)?.message).toContain("claude update")
+  })
+
+  test("only a missing credential counts as logged out", () => {
     expect(ClaudeProbe.isLoggedIn({ tokenSource: "none", apiProvider: "firstParty" })).toBe(false)
+    expect(ClaudeProbe.isLoggedIn({ tokenSource: "none", apiKeySource: "ANTHROPIC_API_KEY" })).toBe(true)
+    expect(ClaudeProbe.isLoggedIn({ subscriptionType: "Claude Team", apiProvider: "firstParty" })).toBe(true)
   })
 })

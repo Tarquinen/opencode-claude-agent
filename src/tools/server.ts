@@ -2,14 +2,16 @@ export * as ToolServer from "./server.js"
 
 import type { LanguageModelV3FunctionTool } from "@ai-sdk/provider"
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk"
-import { Server, type Tool } from "@modelcontextprotocol/server"
+import type { Tool } from "@modelcontextprotocol/server"
 import { ToolNames } from "./names.js"
 import type { PendingTools } from "./pending.js"
 
-export function make(
+export async function make(
   tools: readonly LanguageModelV3FunctionTool[],
   pending: PendingTools.Interface,
-): McpSdkServerConfigWithInstance {
+): Promise<McpSdkServerConfigWithInstance> {
+  // Loaded on first use, so opencode starts without loading the MCP SDK.
+  const { Server } = await import("@modelcontextprotocol/server")
   const server = new Server({ name: "opencode", version: "1.0.0" }, { capabilities: { tools: {} } })
   const definitions = tools.map(
     (tool): Tool => ({
@@ -24,6 +26,7 @@ export function make(
   server.setRequestHandler("tools/list", async () => ({ tools: definitions }))
   server.setRequestHandler("tools/call", async (request) => {
     const name = ToolNames.PREFIX + request.params.name
+    // Throws for a tool we did not offer
     ToolNames.original(name, tools)
     return pending.call(name)
   })

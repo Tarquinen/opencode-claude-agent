@@ -24,7 +24,7 @@ import { ToolResult } from "../tools/result.js"
 export const HANDOVER_MS = 10_000
 export const IDLE_MS = 5 * 60_000
 
-interface Request {
+export interface Request {
   // Only primary calls have one. Side calls run in a throwaway process.
   readonly sessionID?: string
   // Native OpenCode fork lineage, or the session supplying a compaction/generate snapshot.
@@ -145,41 +145,51 @@ export function registry() {
 
     const open = Effect.fn("ClaudeSessions.open")(function* (entry: Entry, request: Request) {
       const starting = !entry.process
-      if (!entry.process) {
-        const executable = input.io.which()
-        if (!executable) {
-          yield* input.status.report({ type: "missing" })
-          return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
-        }
-        const pending = PendingTools.make()
-        const session = yield* attempt(() =>
-          ClaudeSession.start(
-            ClaudeQueryOptions.session({
-              executable,
-              io: input.io,
-              connection: request.connection,
-              directory: input.directory,
-              model: request.model,
-              effort: request.effort,
-              maxOutputTokens: request.maxOutputTokens,
-              system: request.system,
-              tools: request.tools,
-              pending,
-              persist: request.sessionID !== undefined,
-              resume: entry.record?.claudeSessionID,
-            }),
-          ),
-        )
-        entry.process = { session, pending, model: request.model, effort: request.effort, launch: launch(request) }
-      }
-      const process = entry.process
-      const probe = yield* attempt(() => process.session.ready).pipe(
-        Effect.timeout("30 seconds"),
-        Effect.mapError((error) => new Error(String(error))),
-        Effect.onError(() => stop(entry).pipe(Effect.ignore)),
+      // A cancel can only land while waiting for ready, so a started process is always recorded and stopped.
+      const opened = yield* Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          if (!entry.process) {
+            const executable = input.io.which()
+            if (!executable) {
+              yield* input.status.report({ type: "missing" })
+              return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
+            }
+            const pending = PendingTools.make()
+            const session = yield* attempt(async () =>
+              ClaudeSession.start(
+                await ClaudeQueryOptions.session({
+                  executable,
+                  io: input.io,
+                  connection: request.connection,
+                  directory: input.directory,
+                  model: request.model,
+                  effort: request.effort,
+                  maxOutputTokens: request.maxOutputTokens,
+                  system: request.system,
+                  tools: request.tools,
+                  pending,
+                  persist: request.sessionID !== undefined,
+                  resume: entry.record?.claudeSessionID,
+                }),
+              ),
+            )
+            entry.process = { session, pending, model: request.model, effort: request.effort, launch: launch(request) }
+          }
+          const process = entry.process
+          const probe = yield* restore(
+            attempt(() => process.session.ready).pipe(
+              Effect.timeoutOrElse({
+                duration: "30 seconds",
+                orElse: () => Effect.fail(new Error("claude did not start within 30 seconds")),
+              }),
+            ),
+          ).pipe(Effect.onError(() => stop(entry).pipe(Effect.ignore)))
+          return { process, probe }
+        }),
       )
+      const process = opened.process
       // A new process reports its version, login and models, which keeps the model list current without a separate check.
-      if (starting) yield* input.status.report({ type: "ready", probe })
+      if (starting) yield* input.status.report({ type: "ready", probe: opened.probe })
       // Apply controls before sending input or releasing parked tool results.
       if (process.model !== request.model) {
         yield* attempt(() => process.session.setModel(request.model))

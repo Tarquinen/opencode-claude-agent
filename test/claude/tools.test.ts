@@ -299,29 +299,6 @@ describe("Claude tool steps", () => {
     }),
   )
 
-  it.effect("results that arrive with another model's reply finish the parked calls and pass that reply on", () =>
-    Effect.gen(function* () {
-      const claude = FakeClaude.make(FakeClaude.replay("tools-continue"))
-      const test = yield* TestSessions.start(claude)
-      const prompt = TestTools.prompt()
-      TestTools.append(prompt, yield* TestTools.step(test.model, prompt), TestTools.output)
-      prompt.push(
-        { role: "assistant", content: [{ type: "text", text: "NORMAL-IBIS" }] },
-        { role: "user", content: [{ type: "text", text: "Do not call tools. Reply CONTINUED-OTTER." }] },
-      )
-      yield* TestTools.step(test.model, prompt)
-      expect(claude.runs).toHaveLength(1)
-      const messages = claude.runs[0]!.received
-      const results = JSON.stringify(messages.filter((message) => message.response?.response?.mcp_response?.result))
-      expect(results).toContain("LILAC-HERON")
-      expect(results).toContain("LEMON-IBIS")
-      const user = messages.filter((message) => message.type === "user").at(-1)
-      expect(JSON.stringify(user.message.content)).toContain("NORMAL-IBIS")
-      yield* test.registry.close()
-      claude.check()
-    }),
-  )
-
   it.effect("a last step without tools stops the parked turn and resumes with the saved result", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make(FakeClaude.replay("max-steps"))

@@ -28,7 +28,7 @@ export const register = Effect.fn("ClaudeSessionHooks.register")(function* (ctx:
         // Compaction has its own hook, so it keeps OpenCode's summary budget.
         delete event.options.maxTokens
         // Preserve tool error status before the AI SDK bridge flattens error results to plain text.
-        event.messages.forEach((message, index) => {
+        event.messages = event.messages.map((message) => {
           const content = message.content.map((part) => {
             if (part.type !== "tool-result" || part.result.type !== "error") return part
             const flags = {
@@ -38,7 +38,7 @@ export const register = Effect.fn("ClaudeSessionHooks.register")(function* (ctx:
             }
             return { ...part, providerMetadata: { ...part.providerMetadata, [ClaudeProvider.ID]: flags } }
           })
-          event.messages[index] = { ...message, content }
+          return { ...message, content }
         })
       }),
     { providerID: ClaudeProvider.ID },

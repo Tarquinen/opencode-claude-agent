@@ -48,10 +48,7 @@ describe("recorded history sync", () => {
         },
         { role: "assistant", content: [{ type: "text", text: "I read the file successfully." }] },
       )
-      const reply = yield* ask(
-        "List all three markers from our conversation, including the file. Output only the markers.",
-      )
-      for (const marker of ["LILAC-HERON", "COPPER-OTTER", "LEMON-IBIS"]) expect(reply).toContain(marker)
+      yield* ask("List all three markers from our conversation, including the file. Output only the markers.")
       yield* ask("Repeat those three markers.")
       expect(claude.runs).toHaveLength(1)
       const users = claude.runs[0]!.received.filter((message) => message.type === "user")

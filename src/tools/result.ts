@@ -10,11 +10,16 @@ import type { CallToolResult } from "@modelcontextprotocol/server"
 import { ConvertToClaudeMessage } from "../language-model/convert-to-claude-message.js"
 import { Fingerprint } from "../sync/fingerprint.js"
 
+export interface Result {
+  readonly mcp: CallToolResult
+  readonly replacement: ConvertToClaudeMessage.ContentBlock[] | undefined
+}
+
 export function convert(
   output: LanguageModelV3ToolResultOutput,
   files: readonly LanguageModelV3FilePart[] = [],
   failed = false,
-) {
+): Result {
   const parts: Array<{ type: "text"; text: string } | LanguageModelV3FilePart> = []
   switch (output.type) {
     case "text":
@@ -39,6 +44,7 @@ export function convert(
           continue
         }
         if (part.type === "image-url") {
+          // Only picks an image block. URL images are sent without a media type.
           parts.push({ type: "file", mediaType: "image/png", data: new URL(part.url) })
           continue
         }
@@ -67,8 +73,6 @@ export function convert(
   // The PostToolUse hook replaces tool_result.content, so it needs content blocks rather than an MCP envelope.
   return { mcp, replacement: replace ? content : undefined }
 }
-
-export type Result = ReturnType<typeof convert>
 
 export function collect(prompt: LanguageModelV3Prompt, start: number) {
   const results = new Map<string, Result>()

@@ -4,6 +4,7 @@ import { TestClock } from "effect/testing"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
 import { ClaudeAgentLanguageModel } from "../../src/language-model/claude-agent-language-model.js"
 import { RequestKind } from "../../src/language-model/request-kind.js"
+import { ClaudeSystemPrompt } from "../../src/language-model/system-prompt.js"
 import { SessionRecord } from "../../src/sync/record.js"
 import { it } from "../lib/effect.js"
 import { FakeClaude } from "../lib/fake-claude.js"
@@ -332,14 +333,16 @@ describe("Claude sessions", () => {
         FakeClaude.expectInterrupt(),
       ])
       const test = yield* TestSessions.start(claude)
-      yield* TestTools.step(test.model, first)
-      const parts = yield* TestTools.step(test.model, TestSessions.followup(), TestTools.tools, "generate")
+      // OpenCode's session hooks set this on chats and branches alike.
+      const settings = { "claude-agent": { [ClaudeSystemPrompt.AGENT_OPTION]: "AGENT-ROLE" } }
+      yield* TestTools.step(test.model, first, TestTools.tools, "primary", settings)
+      const parts = yield* TestTools.step(test.model, TestSessions.followup(), TestTools.tools, "generate", settings)
       const chat = claude.runs[0]!.received.find((message) => message.request?.subtype === "initialize").request
       const branch = claude.runs[1]!.received.find((message) => message.request?.subtype === "initialize").request
       expect(chat.sdkMcpServers).toEqual(["opencode"])
       expect(branch.sdkMcpServers).toEqual(chat.sdkMcpServers)
+      expect(chat.appendSystemPrompt).toContain("AGENT-ROLE")
       expect(branch.appendSystemPrompt).toBe(chat.appendSystemPrompt)
-      expect(branch.appendSystemPrompt).toContain("<opencode_tools>")
       // The reply ends at the tool call, and the throwaway process and fork are cleaned up.
       expect(parts.filter((part) => part.type === "tool-call")).toHaveLength(2)
       yield* Effect.promise(() => claude.runs[1]!.closed)

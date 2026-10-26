@@ -99,6 +99,25 @@ describe("loading the plugin", () => {
     }),
   )
 
+  it.live("connecting while logged out of claude asks the user to sign in", () =>
+    Effect.gen(function* () {
+      const onConnect = FakeClaude.expectStartup({ recording: "startup-logged-out" })
+      const claude = FakeClaude.make([onConnect])
+      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }) })
+      yield* TestOpenCode.connect(test.opencode)
+      yield* Effect.promise(() => claude.reached(onConnect))
+      const connection = yield* TestOpenCode.waitUntil(
+        TestOpenCode.connection(test.opencode),
+        (connection) => connection?.status !== undefined,
+      )
+      expect(connection?.status).toMatchObject({
+        status: "needs_auth",
+        message: expect.stringContaining("claude auth login"),
+      })
+      claude.check()
+    }),
+  )
+
   it.live("an API-key login is not a sign-in problem, and its models work", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make(

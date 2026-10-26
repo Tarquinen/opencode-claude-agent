@@ -34,6 +34,8 @@ export async function start(options: Options) {
     initialized = true
     return { version: init.claude_code_version!, account: init.account, models: init.models }
   })
+  // A cancel during startup can stop the session before anything awaits ready.
+  ready.catch(() => {})
 
   function finishTurn() {
     if (!turn) return

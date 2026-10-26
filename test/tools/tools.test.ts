@@ -106,7 +106,6 @@ describe("tool bridge conversion", () => {
           ].join("\n\n"),
         },
       ],
-      true,
       "CUSTOM-ROLE",
     )
     expect(system.preset).toBe("claude_code")

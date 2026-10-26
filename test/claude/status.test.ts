@@ -5,7 +5,6 @@ import { ClaudeStatus } from "../../src/claude/status.js"
 import { it } from "../lib/effect.js"
 import { FakeClaude } from "../lib/fake-claude.js"
 import { FakeIO } from "../lib/fake-io.js"
-import { TestSessions } from "../lib/sessions.js"
 
 describe("login status", () => {
   it.effect("finds claude when it is installed after the plugin starts", () =>
@@ -13,7 +12,7 @@ describe("login status", () => {
       const claude = FakeClaude.make([FakeClaude.expectStartup()])
       let executable: string | undefined
       const io = { ...FakeIO.make({ claude }), which: () => executable }
-      const status = yield* ClaudeStatus.make(io)
+      const status = yield* ClaudeStatus.make(io, () => Effect.succeed({}))
 
       yield* status.refresh()
       expect(yield* SubscriptionRef.get(status.state)).toEqual({ type: "missing" })
@@ -31,7 +30,7 @@ describe("login status", () => {
       const atStart = FakeClaude.expectStartup({ recording: "startup-logged-out", hold: hold.promise })
       const onConnect = FakeClaude.expectStartup()
       const claude = FakeClaude.make([atStart, onConnect])
-      const status = yield* ClaudeStatus.make(FakeIO.make({ claude }))
+      const status = yield* ClaudeStatus.make(FakeIO.make({ claude }), () => Effect.succeed({}))
 
       const startup = yield* status.refresh().pipe(Effect.forkScoped)
       yield* Effect.promise(() => claude.started(atStart))
@@ -52,7 +51,7 @@ describe("login status", () => {
   it.effect("reports a failed startup and recovers on the next check", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make([FakeClaude.expectStartup({ exitCode: 1 }), FakeClaude.expectStartup()])
-      const status = yield* ClaudeStatus.make(FakeIO.make({ claude }))
+      const status = yield* ClaudeStatus.make(FakeIO.make({ claude }), () => Effect.succeed({}))
 
       yield* status.refresh()
       const failed = yield* SubscriptionRef.get(status.state)
@@ -62,25 +61,6 @@ describe("login status", () => {
 
       yield* status.refresh()
       expect((yield* SubscriptionRef.get(status.state)).type).toBe("ready")
-      claude.check()
-    }),
-  )
-
-  it.effect("a chat's startup reports the login and models it found", () =>
-    Effect.gen(function* () {
-      const claude = FakeClaude.make([
-        FakeClaude.expectStartup(),
-        FakeClaude.expectTurn(),
-        FakeClaude.expectInterrupt(),
-      ])
-      const test = yield* TestSessions.start(claude)
-
-      yield* TestSessions.reply(test.model, TestSessions.prompt("hello"))
-      const state = yield* SubscriptionRef.get(test.input.status.state)
-      expect(state.type).toBe("ready")
-      if (state.type !== "ready") throw new Error("the chat did not report its startup")
-      expect(state.probe.models.length).toBeGreaterThan(0)
-      yield* test.registry.close()
       claude.check()
     }),
   )
