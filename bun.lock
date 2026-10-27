@@ -25,6 +25,10 @@
         "@opencode/plugin": "^2.0.25 || ^0.0.0-dev",
         "effect": "^4.0.0",
       },
+      "optionalPeers": [
+        "@opencode/plugin",
+        "effect",
+      ],
     },
   },
   "packages": {
