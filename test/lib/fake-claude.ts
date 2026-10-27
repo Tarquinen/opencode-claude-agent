@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events"
 import { createInterface } from "node:readline"
 import { PassThrough } from "node:stream"
 import type {
+  AccountInfo,
   Options,
   SDKControlInitializeResponse,
   SessionMessage,
@@ -85,10 +86,12 @@ export function expectStartup(input?: {
   readonly recording?: string
   readonly hold?: Promise<void>
   readonly exitCode?: number
+  readonly account?: AccountInfo
 }): Startup {
+  const reply = Recorder.startupReply(Recorder.load(input?.recording ?? "startup"))
   return {
     type: "startup",
-    reply: Recorder.startupReply(Recorder.load(input?.recording ?? "startup")),
+    reply: input?.account ? { ...reply, account: input.account } : reply,
     hold: input?.hold,
     exitCode: input?.exitCode,
     started: Promise.withResolvers<void>(),

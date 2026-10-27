@@ -22,12 +22,14 @@ export const tempDirectory = Effect.acquireRelease(
 )
 
 // Runs opencode inside the test with our plugin, built from the given ClaudeIO. Everything lives in a temp folder
-// and, by default, an in-memory database. Restart tests can pass a shared folder and database path.
+// and, by default, an in-memory database. Restart tests can pass a shared folder and database path. `before` plugins
+// load ahead of ours, like the models.dev providers opencode lists first.
 export const start = Effect.fn("TestOpenCode.start")(function* (input: {
   readonly io: ClaudeIO.Interface
   readonly directory?: string
   readonly database?: string
   readonly registry?: ClaudeSessions.Registry
+  readonly before?: readonly Plugin[]
   readonly plugins?: readonly Plugin[]
   readonly config?: Record<string, unknown>
 }) {
@@ -37,7 +39,7 @@ export const start = Effect.fn("TestOpenCode.start")(function* (input: {
     config: { directory, project: false, content: JSON.stringify(input.config ?? {}) },
     models: { fetch: false },
     fs: { filewatcher: false },
-    plugins: [make(input.io, input.registry), ...(input.plugins ?? [])],
+    plugins: [...(input.before ?? []), make(input.io, input.registry), ...(input.plugins ?? [])],
   })
   // Listing models waits for plugins to finish loading
   yield* opencode.model.list()

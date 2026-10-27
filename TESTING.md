@@ -290,6 +290,7 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | The start-up flags and environment turn off everything listed in PLAN.md | 2 | 1 |
 | Startup lists no models and runs no `claude`; connecting fills the list from claude, with effort variants, Haiku's family, attachment support and empty cost | 3 | 1 |
 | Saved models are restored after an opencode restart without running `claude` | 3 | 1 |
+| Costs follow the login: none for a subscription or a custom base URL, Anthropic's prices for an API key, a cloud's prices for a cloud account, and saved prices after a restart | 3 | 1 |
 | Connecting without claude installed shows a sign-in problem, and the next start checks again | 3 | 1 |
 | A chat's startup reports the login and models it found | 2 | 1 |
 | Startup and reconnect checks run in order, so an older account snapshot cannot overwrite the new login | 2 | 1 |

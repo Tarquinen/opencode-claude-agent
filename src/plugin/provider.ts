@@ -1,8 +1,10 @@
 export * as ClaudeProvider from "./provider.js"
 
+import type { AccountInfo } from "@anthropic-ai/claude-agent-sdk"
 import { Model, Provider } from "@opencode/plugin/effect"
 import type { Context } from "@opencode/plugin/effect/plugin"
 import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect"
+import type { ClaudeIO } from "../claude/io.js"
 import type { ClaudeProbe } from "../claude/probe.js"
 import { ClaudeQueryOptions } from "../claude/query-options.js"
 import type { ClaudeStatus } from "../claude/status.js"
@@ -16,16 +18,39 @@ const CatalogModel = Schema.Struct({
   name: Schema.String,
   efforts: Schema.Array(Schema.String),
   contextWindow: Schema.optionalKey(Schema.Number),
+  resolvedModel: Schema.optionalKey(Schema.String),
 })
 type CatalogModel = typeof CatalogModel.Type
-const Catalog = Schema.Array(CatalogModel)
+const Catalog = Schema.Struct({
+  priceSource: Schema.optionalKey(Provider.ID),
+  models: Schema.Array(CatalogModel),
+})
+type Catalog = typeof Catalog.Type
 const CATALOG_KEY = "models"
 
-export const register = Effect.fn("ClaudeProvider.register")(function* (ctx: Context, status: ClaudeStatus.Interface) {
+// Mantle is Bedrock serving Anthropic's API, and opencode drops most of its `anthropic.…` IDs from Bedrock's list,
+// so it uses Anthropic's prices.
+const PRICE_SOURCES: Partial<Record<NonNullable<AccountInfo["apiProvider"]>, Provider.ID>> = {
+  firstParty: Provider.ID.anthropic,
+  anthropicAws: Provider.ID.anthropic,
+  anthropicGoogleCloud: Provider.ID.anthropic,
+  mantle: Provider.ID.anthropic,
+  bedrock: Provider.ID.amazonBedrock,
+  vertex: Provider.ID.googleVertex,
+  foundry: Provider.ID.azure,
+}
+
+export const register = Effect.fn("ClaudeProvider.register")(function* (
+  ctx: Context,
+  status: ClaudeStatus.Interface,
+  io: ClaudeIO.Interface,
+) {
   const saved = Schema.decodeUnknownOption(Catalog)(yield* ctx.storage.get(CATALOG_KEY))
-  let catalog = Option.getOrElse(saved, (): readonly CatalogModel[] => [])
+  const current = { catalog: Option.getOrElse(saved, (): Catalog => ({ models: [] })) }
 
   yield* ctx.provider.transform((editor) => {
+    const source = current.catalog.priceSource
+    const prices = source ? editor.get(source)?.models : undefined
     editor.add({
       info: {
         id: ID,
@@ -33,7 +58,7 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (ctx: Con
         activation: "auto",
         package: `aisdk:${SdkPlaceholder.url}`,
       },
-      models: catalog.map(toModel),
+      models: current.catalog.models.map((model) => toModel(model, prices)),
     })
   })
 
@@ -41,10 +66,14 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (ctx: Con
     Stream.runForEach((state) =>
       Effect.gen(function* () {
         if (state.type !== "ready") return
-        const next = fromClaude(state.probe.models, catalog)
-        if (JSON.stringify(next) === JSON.stringify(catalog)) return
-        catalog = next
-        yield* ctx.storage.set(CATALOG_KEY, catalog)
+        const baseURL = (yield* connection(ctx)).ANTHROPIC_BASE_URL ?? io.env().ANTHROPIC_BASE_URL
+        const next = {
+          priceSource: priceSource(state.probe.account, baseURL),
+          models: fromClaude(state.probe.models, current.catalog.models),
+        }
+        if (JSON.stringify(next) === JSON.stringify(current.catalog)) return
+        current.catalog = next
+        yield* ctx.storage.set(CATALOG_KEY, current.catalog)
         yield* ctx.provider.reload()
       }),
     ),
@@ -52,7 +81,7 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (ctx: Con
   )
 
   // Without a saved list there is no model to pick, so the first message that would fill it can never be sent.
-  if (catalog.length === 0 && (yield* ctx.integration.connection.active(ID))) {
+  if (current.catalog.models.length === 0 && (yield* ctx.integration.connection.active(ID))) {
     yield* status.refresh().pipe(Effect.forkScoped)
   }
 })
@@ -77,13 +106,26 @@ function fromClaude(models: readonly ClaudeProbe.Model[], saved: readonly Catalo
       name: model.displayName,
       efforts: model.supportedEffortLevels ?? [],
       contextWindow: model.contextWindow ?? known.get(model.value),
+      resolvedModel: model.resolvedModel,
     })
   }
   return result
 }
 
-function toModel(model: CatalogModel): Model.Info {
+// A subscription covers usage, and a custom base URL or an enterprise gateway can bill anything, so they show no cost.
+function priceSource(account: AccountInfo, baseURL: string | undefined) {
+  if (baseURL) return
+  if (account.apiProvider === undefined) return
+  if (account.apiProvider === "firstParty" && account.apiKeySource === undefined) return
+  return PRICE_SOURCES[account.apiProvider]
+}
+
+function toModel(model: CatalogModel, prices: ReadonlyMap<string, Model.Info> | undefined): Model.Info {
   const defaults = Model.Info.default(ID, Model.ID.make(model.id))
+  // The 1M context version's price tiers are on the base model
+  const id = (model.resolvedModel ?? model.id).replace(/\[1m\]$/, "")
+  // Mantle names models `anthropic.claude-…`, and Vertex lists current models as `claude-…@default`
+  const priced = prices?.get(id) ?? prices?.get(id.replace(/^anthropic\./, "")) ?? prices?.get(`${id}@default`)
   return {
     ...defaults,
     name: model.name,
@@ -93,7 +135,6 @@ function toModel(model: CatalogModel): Model.Info {
     family: model.id.includes("haiku") ? Model.Family.make("claude-haiku") : undefined,
     capabilities: { tools: true, input: ["text", "image", "pdf"], output: ["text"] },
     variants: model.efforts.map((effort) => ({ id: Model.VariantID.make(effort), settings: { effort } })),
-    // Covered by the subscription
-    cost: [],
+    cost: priced?.cost ?? [],
   }
 }
