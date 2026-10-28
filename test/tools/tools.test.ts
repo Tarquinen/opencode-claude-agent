@@ -18,7 +18,7 @@ describe("tool bridge conversion", () => {
       names.add(name)
     }
     expect(names.size).toBe(tools.length)
-    expect(() => ToolNames.original("Bash", tools)).toThrow("unregistered")
+    expect(ToolNames.original("Bash", tools)).toBeUndefined()
   })
 
   test("long subagent descriptions retain the actual OpenCode agent list", () => {

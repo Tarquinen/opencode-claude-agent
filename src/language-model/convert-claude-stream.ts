@@ -86,11 +86,13 @@ export function make(tools: readonly LanguageModelV3FunctionTool[]) {
       usage.update(message.message.id, message.message.usage)
       for (const block of message.message.content) {
         if (block.type !== "tool_use") continue
+        const toolName = ToolNames.original(block.name, tools)
+        if (!toolName) continue
         calledTools = true
         parts.push({
           type: "tool-call",
           toolCallId: block.id,
-          toolName: ToolNames.original(block.name, tools),
+          toolName,
           input: JSON.stringify(block.input),
           providerMetadata: metadata,
         })

@@ -1,6 +1,6 @@
 export * as TestSessions from "./sessions.js"
 
-import type { LanguageModelV3Prompt, LanguageModelV3StreamPart } from "@ai-sdk/provider"
+import type { LanguageModelV3FunctionTool, LanguageModelV3Prompt, LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { SessionRequestKind } from "@opencode/plugin/effect/session"
 import { Effect } from "effect"
@@ -65,10 +65,14 @@ export const start = Effect.fn(function* (claude: FakeClaude.Fake, saved = stora
 })
 
 // Direct SDK experiments supply their own tool handlers and read through every step to the result.
-export async function send(session: ClaudeSession.Interface, content: SDKUserMessage["message"]["content"]) {
+export async function send(
+  session: ClaudeSession.Interface,
+  content: SDKUserMessage["message"]["content"],
+  tools: readonly LanguageModelV3FunctionTool[],
+) {
   session.begin(content)
   for (;;) {
-    const result = await session.readStep(() => {})
+    const result = await session.readStep(() => {}, tools)
     if (result !== "tools") return result
   }
 }

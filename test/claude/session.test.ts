@@ -18,7 +18,7 @@ describe("Claude session", () => {
       await claude.started(turn)
       await claude.runs[0]!.exit(code)
       const message = code === 0 ? "Claude Code stopped before finishing its reply" : "code 1"
-      await expect(session.readStep(() => {})).rejects.toThrow(message)
+      await expect(session.readStep(() => {}, [])).rejects.toThrow(message)
       await session.interrupt()
       expect(claude.runs[0]!.received.some((message) => message.request?.subtype === "interrupt")).toBe(false)
     } finally {

@@ -80,7 +80,7 @@ export const park = Effect.fn(function* (io: ClaudeIO.Interface, directory: stri
   yield* Effect.addFinalizer(() => Effect.promise(() => session.stop().finally(() => pending.clear())))
   yield* Effect.promise(() => session.ready)
   session.begin(ConvertToClaudeMessage.content(prompt()))
-  const boundary = yield* Effect.promise(() => session.readStep(() => {}))
+  const boundary = yield* Effect.promise(() => session.readStep(() => {}, tools))
   if (boundary !== "tools") throw new Error("Expected a tool step")
   yield* Effect.promise(() => entered.promise)
   return { session, pending, settled: settled.promise }

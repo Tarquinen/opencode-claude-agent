@@ -247,6 +247,7 @@ export function registry() {
             }
             if (part.type !== "tool_use") continue
             const name = ToolNames.original(part.name, request.tools)
+            if (!name) continue
             live.pending.expect(part.id, part.name)
             waiting.push(part.id)
             reply.push({ type: "tool-call", toolCallId: part.id, toolName: name, input: part.input })
@@ -270,7 +271,7 @@ export function registry() {
             live.pending.resolve(item.id, item.result)
           }
         }
-        const outcome = yield* attempt(() => session.readStep(emit))
+        const outcome = yield* attempt(() => session.readStep(emit, request.tools))
         parked = outcome === "tools"
         completed = true
         live.waiting = parked ? waiting : undefined

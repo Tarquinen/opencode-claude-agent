@@ -38,7 +38,6 @@ export class Model implements LanguageModelV3 {
       options.toolChoice?.type === "none"
         ? []
         : (options.tools ?? []).filter((tool): tool is LanguageModelV3FunctionTool => tool.type === "function")
-    const convert = ConvertClaudeStream.make(tools)
     const headers = options.headers ?? {}
     const kind = headers[RequestKind.HEADER]
     const session = headers[RequestKind.SESSION_HEADER]
@@ -53,6 +52,7 @@ export class Model implements LanguageModelV3 {
     const sourceID = primary ? headers[RequestKind.FORK_HEADER] : branch ? session : undefined
     // Branches offer the chat's tools and system prompt so Claude reuses the chat's prompt cache.
     const offered = primary || branch ? tools : []
+    const convert = ConvertClaudeStream.make(offered)
     // Titles are standalone tasks, so OpenCode's system prompt replaces Claude Code's.
     const system =
       primary || branch ? ClaudeSystemPrompt.make(options.prompt, agent) : ClaudeSystemPrompt.utility(options.prompt)

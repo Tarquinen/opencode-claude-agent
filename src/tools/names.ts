@@ -12,10 +12,9 @@ export function short(name: string) {
   return name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, limit - 11) + "_" + hash
 }
 
+// Undefined for a tool we did not offer. Claude Code answers those calls itself, without our hooks or server.
 export function original(name: string, tools: readonly LanguageModelV3FunctionTool[]) {
-  const tool = tools.find((tool) => PREFIX + short(tool.name) === name)
-  if (tool) return tool.name
-  throw new Error(`Claude Code called an unregistered OpenCode tool: ${name}`)
+  return tools.find((tool) => PREFIX + short(tool.name) === name)?.name
 }
 
 // Claude Code cuts each MCP tool description at this many characters.

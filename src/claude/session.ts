@@ -1,6 +1,8 @@
 export * as ClaudeSession from "./session.js"
 
+import type { LanguageModelV3FunctionTool } from "@ai-sdk/provider"
 import type { Options, SDKMessage, SDKResultMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
+import { ToolNames } from "../tools/names.js"
 import { ClaudeProbe } from "./probe.js"
 import { ClaudeSDK } from "./sdk.js"
 
@@ -99,7 +101,10 @@ export async function start(options: Options) {
     input.enqueue({ type: "user", uuid, message: { role: "user", content }, parent_tool_use_id: null })
   }
 
-  async function readStep(emit: (message: SDKMessage) => void): Promise<SDKResultMessage | "tools"> {
+  async function readStep(
+    emit: (message: SDKMessage) => void,
+    tools: readonly LanguageModelV3FunctionTool[],
+  ): Promise<SDKResultMessage | "tools"> {
     const active = turn
     if (!active) throw new Error("No Claude turn to read")
     let calledTools = false
@@ -115,7 +120,8 @@ export async function start(options: Options) {
       emit(message)
       if (message.type === "assistant" && message.parent_tool_use_id === null) {
         for (const part of message.message.content) {
-          if (part.type === "tool_use") calledTools = true
+          // Calls to tools we did not offer get Claude Code's own error, and the turn continues without OpenCode.
+          if (part.type === "tool_use" && ToolNames.original(part.name, tools)) calledTools = true
         }
       }
       const replyEnded =

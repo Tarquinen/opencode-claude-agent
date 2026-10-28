@@ -60,7 +60,7 @@ describe.skipIf(!live)("tools against real Claude", () => {
         const transcript = yield* Effect.promise(() => getSessionMessages(parked.session.id, { dir: directory }))
         expect(JSON.stringify(transcript)).toContain('"is_error":true')
         const result = yield* Effect.promise(() =>
-          TestSessions.send(parked.session, "Do not call tools. Reply only with WAITING-OTTER."),
+          TestSessions.send(parked.session, "Do not call tools. Reply only with WAITING-OTTER.", TestTools.tools),
         )
         expect(result.subtype).toBe("success")
         if (result.subtype === "success") expect(result.result.trim()).toBe("WAITING-OTTER")
