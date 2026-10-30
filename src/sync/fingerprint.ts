@@ -81,7 +81,7 @@ function isToolMedia(message: LanguageModelV3Message) {
   )
 }
 
-export function groups(prompt: LanguageModelV3Prompt): Group[] {
+export function groups(prompt: LanguageModelV3Prompt, prefix: readonly { readonly hash: string }[] = []): Group[] {
   const groups: Group[] = []
   let i = 0
   while (i < prompt.length) {
@@ -94,6 +94,9 @@ export function groups(prompt: LanguageModelV3Prompt): Group[] {
     const members = [hash(parts)]
     if (message.role === "user") {
       while (i < prompt.length) {
+        // A submitted input remains a boundary even when a later user message arrives without a visible reply.
+        const checkpoint = prefix[groups.length]
+        if (checkpoint && hash({ role: message.role, members: members.toSorted() }) === checkpoint.hash) break
         const next = prompt[i]!
         if (next.role !== "user") break
         members.push(hash(visible(next)))

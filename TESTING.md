@@ -304,7 +304,7 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | One process per session, and an old process stopping never closes its replacement | 2 | 2 |
 | A plugin reload keeps live sessions, and waiting tool calls once tools exist | 2 | 2, 4 |
 | Cancelling before initialization closes the process without saving a nonexistent session; chat rejects an incompatible CLI before sending user input | 2 | 2 |
-| Text cancellation drains before the next turn; if the saved partial reply differs from Claude's transcript, reconciliation rebuilds | 2, 4 | 2, 3 |
+| Text cancellation drains and preserves the native session, including after restart or when OpenCode saves no partial text; earlier edits still branch | 1, 2, 3, 4 | 2, 3 |
 | Idle shutdown and server restart resume the saved Claude ID; OpenCode persists the reply and token counts | 2, 3, 4 | 2 |
 | Chat keeps the Claude Code preset and host note; changes to opencode's built-in system prompt do not replace it or restart the session | 2 | 2 |
 | Titles preserve native task system instructions; generate/compaction branches retain the Claude preset and native task user input; all side calls run in independent, non-persistent processes | 1, 2, 4 | 2, 5 |

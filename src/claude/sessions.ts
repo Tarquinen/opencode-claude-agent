@@ -262,6 +262,8 @@ export function registry() {
       }
 
       let completed = false
+      let interrupted = false
+      let started = false
       let parked = false
       const step = Effect.gen(function* () {
         if (!continuation) session.begin(content, userID)
@@ -271,6 +273,7 @@ export function registry() {
             live.pending.resolve(item.id, item.result)
           }
         }
+        started = true
         const outcome = yield* attempt(() => session.readStep(emit, request.tools))
         parked = outcome === "tools"
         completed = true
@@ -284,22 +287,31 @@ export function registry() {
       })
 
       const saveRecord = Effect.gen(function* () {
-        if (!request.sessionID || !session.persisted) return
-        const history = completed
-          ? Checkpoints.build({
-              prompt: request.prompt,
-              previous: entry.record,
-              userID,
-              reply,
-              messageID,
-              toolMessages,
-            })
-          : undefined
-        entry.record = { claudeSessionID: session.id, history }
+        if (!request.sessionID || !session.persisted || !started) return
+        const history =
+          completed || interrupted
+            ? Checkpoints.build({
+                prompt: request.prompt,
+                previous: entry.record,
+                userID,
+                reply: completed ? reply : [],
+                messageID: completed ? messageID : undefined,
+                toolMessages,
+              })
+            : undefined
+        entry.record = { claudeSessionID: session.id, history, interrupted: interrupted && !completed }
         yield* records.set(request.sessionID, entry.record)
       })
 
-      yield* step.pipe(Effect.ensuring(interruptUnlessParked), Effect.ensuring(saveRecord))
+      yield* step.pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            interrupted = true
+          }),
+        ),
+        Effect.ensuring(interruptUnlessParked),
+        Effect.ensuring(saveRecord),
+      )
     })
 
     const release = Effect.fn("ClaudeSessions.release")(function* (entry: Entry, request: Request) {

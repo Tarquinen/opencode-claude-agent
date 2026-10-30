@@ -95,6 +95,46 @@ describe("Claude sessions", () => {
         FakeClaude.expectStartup(),
         FakeClaude.expectTurn({ recording: "text-cancel" }),
         interrupt,
+        FakeClaude.expectTurn({ recording: "text-cancel", index: 1 }),
+        FakeClaude.expectInterrupt(),
+      ])
+      const test = yield* TestSessions.start(claude)
+      const result = yield* TestSessions.stream(test.model, first)
+      const reader = result.stream.getReader()
+      // Wait for real partial text
+      const partial = yield* Effect.promise(async () => {
+        for (;;) {
+          const part = await reader.read()
+          if (part.done) throw new Error("Reply ended before any text")
+          if (part.value.type === "text-delta") return part.value.delta
+        }
+      })
+      const cancel = yield* Effect.promise(() => reader.cancel()).pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* Effect.promise(() => claude.started(interrupt))
+      const prompt = [
+        ...first,
+        { role: "assistant" as const, content: [{ type: "text" as const, text: partial }] },
+        { role: "user" as const, content: [{ type: "text" as const, text: "Continue" }] },
+      ]
+      const next = yield* TestSessions.reply(test.model, prompt).pipe(Effect.forkScoped({ startImmediately: true }))
+      expect(claude.runs[0]!.received.filter((message) => message.type === "user")).toHaveLength(1)
+      drain.resolve()
+      yield* Fiber.join(cancel)
+      expect(TestSessions.text(yield* Fiber.join(next))).toBe("COPPER-OTTER")
+      expect(claude.runs).toHaveLength(1)
+      const users = claude.runs[0]!.received.filter((message) => message.type === "user")
+      expect(users[1].message.content).toEqual([{ type: "text", text: "Continue" }])
+      yield* test.registry.close()
+      claude.check()
+    }),
+  )
+
+  it.effect("cancelled history resumes after a registry restart without replaying the partial reply", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make([
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn({ recording: "text-cancel" }),
+        FakeClaude.expectInterrupt({ recording: "text-cancel" }),
         FakeClaude.expectInterrupt(),
         FakeClaude.expectStartup(),
         FakeClaude.expectTurn({ recording: "text-cancel", index: 1 }),
@@ -103,27 +143,31 @@ describe("Claude sessions", () => {
       const test = yield* TestSessions.start(claude)
       const result = yield* TestSessions.stream(test.model, first)
       const reader = result.stream.getReader()
-      // Wait for real partial text
       yield* Effect.promise(async () => {
         for (;;) {
           const part = await reader.read()
           if (part.done) throw new Error("Reply ended before any text")
-          if (part.value.type === "text-delta") return
+          if (part.value.type === "text-delta") break
         }
+        await reader.cancel()
       })
-      const cancel = yield* Effect.promise(() => reader.cancel()).pipe(Effect.forkScoped({ startImmediately: true }))
-      yield* Effect.promise(() => claude.started(interrupt))
-      const next = yield* TestSessions.reply(test.model, TestSessions.followup()).pipe(
-        Effect.forkScoped({ startImmediately: true }),
-      )
-      expect(claude.runs[0]!.received.filter((message) => message.type === "user")).toHaveLength(1)
-      drain.resolve()
-      yield* Fiber.join(cancel)
-      expect(TestSessions.text(yield* Fiber.join(next))).toBe("COPPER-OTTER")
-      // The next authoritative history omits the cancelled animal list, so it must rebuild after draining.
-      expect(claude.runs).toHaveLength(2)
-      expect(claude.runs[1]!.args.some((arg) => arg.startsWith("--resume="))).toBe(false)
+      const saved = (yield* SessionRecord.make(test.storage).get("session-a"))!
+      expect(saved.interrupted).toBe(true)
+      expect(saved.history).toHaveLength(1)
       yield* test.registry.close()
+      const registry = ClaudeSessions.registry()
+      yield* Effect.addFinalizer(() => registry.close())
+      const sessions = yield* registry.attach(test.input)
+      const model = yield* TestSessions.model(sessions)
+      // OpenCode may save no assistant text when cancellation happens early.
+      const prompt = [...first, { role: "user" as const, content: [{ type: "text" as const, text: "Continue" }] }]
+      expect(TestSessions.text(yield* TestSessions.reply(model, prompt))).toBe("COPPER-OTTER")
+      expect(claude.runs[1]!.args).toContain(`--resume=${saved.claudeSessionID}`)
+      const user = claude.runs[1]!.received.find((message) => message.type === "user")
+      expect(user.message.content).toEqual([{ type: "text", text: "Continue" }])
+      const after = (yield* SessionRecord.make(test.storage).get("session-a"))!
+      expect(after.interrupted).toBe(false)
+      yield* registry.close()
       claude.check()
     }),
   )

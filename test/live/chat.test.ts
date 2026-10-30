@@ -104,6 +104,7 @@ describe.skipIf(!live)("chat against real Claude", () => {
           expect(
             (yield* reply(model, next("Stop the list. Reply only with the marker I gave you earlier."))).trim(),
           ).toBe("COPPER-OTTER")
+          expect(storage.ids.size).toBe(1)
         }).pipe(Effect.scoped)
 
         yield* Effect.gen(function* () {

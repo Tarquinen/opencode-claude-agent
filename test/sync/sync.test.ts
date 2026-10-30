@@ -13,6 +13,26 @@ const past = [user("First marker"), assistant("COPPER-OTTER")]
 const record = { claudeSessionID: "claude-a", history: Fingerprint.groups(past) }
 
 describe("history reconciliation", () => {
+  test("interrupted replies preserve the input boundary without hiding earlier edits or missed turns", () => {
+    const input = [...past, user("List animals")]
+    const saved = { claudeSessionID: "claude-a", history: Fingerprint.groups(input), interrupted: true }
+    expect(SyncDecision.decide(input, saved).kind).toBe("changed")
+    expect(SyncDecision.decide([...input, assistant("1. Ot"), user("Stop")], saved)).toEqual({
+      kind: "continue",
+      start: 4,
+    })
+    expect(SyncDecision.decide([...input, user("Stop")], saved)).toEqual({ kind: "continue", start: 3 })
+    expect(
+      SyncDecision.decide(
+        [...input, assistant("1. Ot"), user("Other model"), assistant("New answer"), user("Back")],
+        saved,
+      ),
+    ).toEqual({ kind: "catch-up", start: 4 })
+    expect(SyncDecision.decide([past[0]!, assistant("Edited"), input[2]!, user("Stop")], saved).kind).toBe("changed")
+    expect(SyncDecision.decide([...past, user("Edited request")], saved).kind).toBe("changed")
+    expect(SyncDecision.decide([...past, user("Undo")], saved).kind).toBe("changed")
+  })
+
   test("branches only at a matching checkpoint, never midway through a group of tool calls", () => {
     const history: LanguageModelV3Prompt = [
       ...past,
@@ -80,6 +100,17 @@ describe("history reconciliation", () => {
     const hashes = (prompt: LanguageModelV3Prompt) => Fingerprint.groups(prompt).map((group) => group.hash)
     expect(hashes(changed)).toEqual(hashes(original))
     expect(hashes([user("Changed reminder"), ...past])).not.toEqual(hashes(original))
+  })
+
+  test("keeps submitted user groups separate from new input", () => {
+    const submitted = [user("Plan reminder"), user("List animals")]
+    const prefix = Fingerprint.groups(submitted)
+    const prompt = [submitted[1]!, submitted[0]!, user("Stop")]
+    const groups = Fingerprint.groups(prompt, prefix)
+    expect(groups[0]).toEqual(prefix[0])
+    expect(groups[1]?.start).toBe(2)
+    expect(Fingerprint.groups(prompt)).toHaveLength(1)
+    expect(Fingerprint.groups([user("Edited"), submitted[1]!, user("Stop")], prefix)[0]?.hash).not.toBe(prefix[0]?.hash)
   })
 
   test("compares tool inputs independent of key order and keeps tool images with their result", () => {

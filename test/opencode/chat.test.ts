@@ -11,6 +11,52 @@ import { TestOpenCode } from "../lib/opencode.js"
 import { Recorder } from "../lib/recorder.js"
 
 describe("embedded text chat", () => {
+  it.live("interrupted text continues on the same Claude session", () =>
+    Effect.gen(function* () {
+      const cancelled = FakeClaude.expectTurn({ recording: "text-cancel" })
+      const claude = FakeClaude.make(
+        [
+          FakeClaude.expectStartup(),
+          FakeClaude.expectTurn(),
+          cancelled,
+          FakeClaude.expectInterrupt({ recording: "text-cancel" }),
+          FakeClaude.expectTurn({ recording: "text-cancel", index: 1 }),
+          FakeClaude.expectInterrupt(),
+        ],
+        { probes: true },
+      )
+      const registry = ClaudeSessions.registry()
+      yield* Effect.addFinalizer(() => registry.close())
+      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), registry })
+      yield* TestOpenCode.connect(test.opencode)
+      const session = yield* test.opencode.session.create({
+        title: "Cancellation test",
+        location: { directory: Location.PublicRef.fields.directory.make(test.directory) },
+        model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }),
+      })
+      yield* test.opencode.session.prompt({ sessionID: session.id, text: "Remember COPPER-OTTER." })
+      yield* test.opencode.session.wait({ sessionID: session.id })
+      yield* test.opencode.session.prompt({ sessionID: session.id, text: "List 500 animals." })
+      yield* Effect.promise(() => claude.reached(cancelled))
+      yield* test.opencode.session.interrupt({ sessionID: session.id })
+      yield* test.opencode.session.wait({ sessionID: session.id })
+      yield* test.opencode.session.prompt({ sessionID: session.id, text: "Stop. Recall the marker." })
+      yield* test.opencode.session.wait({ sessionID: session.id })
+      const runs = claude.runs.filter((run) => run.args.includes("--include-partial-messages"))
+      expect(runs).toHaveLength(1)
+      const users = runs[0]!.received.filter((message) => message.type === "user")
+      expect(users).toHaveLength(3)
+      expect(JSON.stringify(users[2].message.content)).toContain("Stop. Recall the marker.")
+      expect(JSON.stringify(users[2].message.content)).not.toContain("<conversation-checkpoint>")
+      expect(JSON.stringify(users[2].message.content)).not.toContain("Remember COPPER-OTTER.")
+      const history = yield* test.opencode.session.export({ sessionID: session.id })
+      const answer = history.messages.findLast((message) => message.type === "assistant")
+      expect(answer?.finish).not.toBe("error")
+      yield* registry.close()
+      claude.check()
+    }),
+  )
+
   const overloaded = {
     ...Recorder.result("text"),
     subtype: "success",
