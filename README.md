@@ -16,7 +16,8 @@ Requires OpenCode 2.2.3 or newer.
    ```
 
 
-3. In OpenCode, use `/connect` → **Claude Agent**, then `/models` to choose a model and effort level.
+3. To disable the bundled Claude Agent provider, add `"-opencode.provider.claude-agent"` to `plugins` in `opencode.json`. Keep `"github:Tarquinen/opencode-claude-agent"` and your other plugin entries.
+4. In OpenCode, use `/connect` → **Claude Agent**, then `/models` to choose a model and effort level.
 
 To update, run `opencode plugin update github:Tarquinen/opencode-claude-agent`. To uninstall, run `opencode plugin remove github:Tarquinen/opencode-claude-agent`.
 
