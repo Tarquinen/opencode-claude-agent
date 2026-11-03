@@ -31,7 +31,6 @@ export function versionError(version: string | undefined) {
   return new Error(`${message} Run \`claude update\`.`)
 }
 
-// Compares release numbers like 2.1.248. A pre-release or build suffix is ignored.
 function atLeast(version: string, minimum: string) {
   const parse = (value: string) => value.split(/[-+]/)[0].split(".").map(Number)
   const current = parse(version)

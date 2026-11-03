@@ -59,7 +59,6 @@ function problem(state: ClaudeStatus.State): Connection.Status | undefined {
       message: "Claude Code is not installed. Install it, then run `claude auth login`.",
       url: "https://code.claude.com/docs/en/setup",
     }
-  // The message already says what went wrong with Claude Code.
   if (state.type === "failed") return { status: "needs_auth", message: state.message }
   if (state.type === "ready" && !ClaudeProbe.isLoggedIn(state.probe.account))
     return { status: "needs_auth", message: "Claude Code is not logged in. Run `claude auth login` in a terminal." }

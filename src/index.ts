@@ -11,8 +11,7 @@ import { ClaudeSessionHooks } from "./plugin/session.js"
 
 export const ID = "opencode.claude-agent"
 
-// Tests pass a fake ClaudeIO here. The registry lives outside setup's scope, so a reload can adopt its processes.
-// Restart tests pass their own and close it, as an exiting opencode would.
+// The registry lives outside setup's scope, so a reload can adopt its processes.
 export const make = (io: ClaudeIO.Interface, registry = ClaudeSessions.registry()) =>
   define({
     id: ID,

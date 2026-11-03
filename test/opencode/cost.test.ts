@@ -37,7 +37,6 @@ const sonnetCost = Effect.fn(function* (opencode: TestOpenCode.Client) {
   return sonnet.cost
 })
 
-// Connects with the given login, as Claude reports it, and returns sonnet's cost once the model list fills
 const connectedCost = Effect.fn(function* (input: {
   readonly account: AccountInfo
   readonly prices: ReturnType<typeof listPrice>

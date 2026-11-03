@@ -21,9 +21,7 @@ export const tempDirectory = Effect.acquireRelease(
   (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
 )
 
-// Runs opencode inside the test with our plugin, built from the given ClaudeIO. Everything lives in a temp folder
-// and, by default, an in-memory database. Restart tests can pass a shared folder and database path. `before` plugins
-// load ahead of ours, like the models.dev providers opencode lists first.
+// `before` plugins load ahead of ours, like the models.dev providers opencode lists first.
 export const start = Effect.fn("TestOpenCode.start")(function* (input: {
   readonly io: ClaudeIO.Interface
   readonly directory?: string
@@ -46,8 +44,6 @@ export const start = Effect.fn("TestOpenCode.start")(function* (input: {
   return { opencode, directory }
 })
 
-// Picks our login method, as a user does in the provider list, then waits for the check it starts to show models
-// or a problem
 export const connect = Effect.fn("TestOpenCode.connect")(function* (opencode: Client) {
   yield* opencode.integration.connect.external({
     integrationID: Integration.ID.make(ClaudeProvider.ID),
@@ -65,7 +61,6 @@ export const models = Effect.fn("TestOpenCode.models")(function* (opencode: Clie
   return list.data.filter((model) => model.providerID === ClaudeProvider.ID).map((model) => String(model.id))
 })
 
-// Our active connection, including any problem the plugin reported on it
 export const connection = Effect.fn("TestOpenCode.connection")(function* (opencode: Client) {
   const list = yield* opencode.integration.list()
   return list.data.find((integration) => String(integration.id) === ClaudeProvider.ID)?.connections[0]

@@ -18,8 +18,6 @@ export type Line =
   | { readonly from: "sdk"; readonly process?: number; readonly message: any }
   | { readonly from: "claude"; readonly process?: number; readonly message: any }
 
-// With RECORD=true, starts the real `claude` and captures traffic without thinking, saved by `save()` to
-// test/fixtures/recordings/<name>.jsonl. Without it, `spawn` is undefined and the SDK starts `claude` itself.
 export function make(name: string, capture = false) {
   const lines: Line[] = []
   const sessionIDs = new Set<string>()
@@ -71,8 +69,7 @@ export function make(name: string, capture = false) {
   return { spawn: enabled || capture ? spawnClaude : undefined, save, sessionIDs, lines: lines as readonly Line[] }
 }
 
-// A chat recording leaves out opencode's login checks, which the fake never replays. A recording of only
-// login checks keeps them. Login checks are the only runs that don't stream partial messages.
+// The fake never replays login checks from a chat recording. They are the only runs that don't stream partial messages.
 function withoutLoginChecks(lines: readonly Line[]) {
   const checks = new Set<number | undefined>()
   let chats = 0
@@ -115,7 +112,6 @@ export function parse(line: string) {
   })
 }
 
-// What `claude` answered to the SDK's first start-up request
 export function startupReply(lines: readonly Line[]) {
   const line = lines.find((line) => line.from === "claude" && line.message.type === "control_response")
   return line?.from === "claude" ? line.message.response.response : undefined

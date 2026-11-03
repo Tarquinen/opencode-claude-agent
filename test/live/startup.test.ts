@@ -35,7 +35,6 @@ const probe = (io: ClaudeIO.Interface) => {
   return ClaudeProbe.run(ClaudeQueryOptions.base({ executable, io }))
 }
 
-// A login check saved as a recording with RECORD=true
 const check = Effect.fn(function* (name: string, io: ClaudeIO.Interface) {
   const recorder = Recorder.make(name)
   const result = yield* probe({ ...io, spawn: recorder.spawn })
