@@ -63,7 +63,7 @@ export const park = Effect.fn(function* (io: ClaudeIO.Interface, directory: stri
       model: "haiku",
       sessionId: crypto.randomUUID(),
       includePartialMessages: true,
-      systemPrompt: ClaudeSystemPrompt.make(prompt()),
+      systemPrompt: ClaudeSystemPrompt.make(),
       hooks: ToolHooks.make(pending),
       mcpServers: {
         opencode: await ToolServer.make(tools, {

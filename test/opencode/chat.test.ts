@@ -169,7 +169,7 @@ describe("embedded text chat", () => {
           expect(assistants[0]!.content).toContainEqual(
             expect.objectContaining({
               type: "text",
-              state: { sessionID: id, messageID: "f4abc1c4-72af-43cc-9dc4-d9707f87aa5a" },
+              native: { sessionID: id, messageID: "f4abc1c4-72af-43cc-9dc4-d9707f87aa5a" },
             }),
           )
           expect(assistants.at(-1)!.content).toContainEqual(

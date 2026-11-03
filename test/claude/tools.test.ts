@@ -9,13 +9,15 @@ import { TestTools } from "../lib/tools.js"
 import { Recorder } from "../lib/recorder.js"
 
 describe("Claude tool steps", () => {
-  it.effect("two tool steps keep one turn alive and match every result to its call", () =>
+  it.effect("two tool steps keep one turn alive past the idle timeout and match every result to its call", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make(FakeClaude.replay("tools"))
       const test = yield* TestSessions.start(claude)
       const prompt = TestTools.prompt()
       const steps = []
       for (let i = 0; i < 3; i++) {
+        // Subagents and unanswered permission prompts can keep OpenCode's tools running this long.
+        yield* TestClock.adjust(ClaudeSessions.IDLE_MS * 2)
         const parts = yield* TestTools.step(test.model, prompt)
         steps.push(parts)
         TestTools.append(prompt, parts, TestTools.output)
@@ -115,6 +117,22 @@ describe("Claude tool steps", () => {
       drain.resolve()
       yield* Fiber.join(close)
       expect(claude.runs[0]!.received.filter((message) => message.request?.subtype === "interrupt")).toHaveLength(1)
+      claude.check()
+    }),
+  )
+
+  it.effect("a turn left waiting for tool results stops IDLE_MS after OpenCode stops running the session", () =>
+    Effect.gen(function* () {
+      const cancel = FakeClaude.replay("tools-waiting-cancel")
+      const nextUser = cancel.findIndex(
+        (step, index) => index > 1 && step.type === "exchange" && step.input.type === "user",
+      )
+      const claude = FakeClaude.make(cancel.slice(0, nextUser))
+      const test = yield* TestSessions.start(claude)
+      yield* TestTools.step(test.model, TestTools.prompt())
+      yield* test.sessions.idle("session-a")
+      yield* TestClock.adjust(ClaudeSessions.IDLE_MS)
+      yield* Effect.promise(() => claude.runs[0]!.closed)
       claude.check()
     }),
   )

@@ -15,12 +15,16 @@ const ISOLATION_ENV = {
   CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
   ENABLE_TOOL_SEARCH: "false",
   CLAUDE_CODE_DISABLE_ADVISOR_TOOL: "1",
+  CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: "1",
+  CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK: "1",
   // Raised so opencode's own truncation applies instead
   MAX_MCP_OUTPUT_TOKENS: "200000",
   // Skips OAuth, so the subscription would not be used
   CLAUDE_CODE_SIMPLE: undefined,
   // A shell-level effort override would take precedence over OpenCode's live effort settings.
   CLAUDE_CODE_EFFORT_LEVEL: undefined,
+  // Caps every OpenCode tool call, which would fail subagents and permission prompts that run longer
+  MCP_TOOL_TIMEOUT: undefined,
 }
 
 export function connectionEnv(connection: {

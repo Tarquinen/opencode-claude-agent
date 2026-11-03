@@ -377,8 +377,13 @@ describe("Claude sessions", () => {
         FakeClaude.expectInterrupt(),
       ])
       const test = yield* TestSessions.start(claude)
-      // OpenCode's session hooks set this on chats and branches alike.
-      const settings = { "claude-agent": { [ClaudeSystemPrompt.AGENT_OPTION]: "AGENT-ROLE" } }
+      // OpenCode's session hooks set these on chats and branches alike.
+      const settings = {
+        "claude-agent": {
+          [ClaudeSystemPrompt.AGENT_OPTION]: "AGENT-ROLE",
+          [ClaudeSystemPrompt.INSTRUCTIONS_OPTION]: "OPENCODE-INSTRUCTIONS",
+        },
+      }
       yield* TestTools.step(test.model, first, TestTools.tools, "primary", settings)
       const parts = yield* TestTools.step(test.model, TestSessions.followup(), TestTools.tools, "generate", settings)
       const chat = claude.runs[0]!.received.find((message) => message.request?.subtype === "initialize").request
@@ -386,6 +391,7 @@ describe("Claude sessions", () => {
       expect(chat.sdkMcpServers).toEqual(["opencode"])
       expect(branch.sdkMcpServers).toEqual(chat.sdkMcpServers)
       expect(chat.appendSystemPrompt).toContain("AGENT-ROLE")
+      expect(chat.appendSystemPrompt).toContain("OPENCODE-INSTRUCTIONS")
       expect(branch.appendSystemPrompt).toBe(chat.appendSystemPrompt)
       // The reply ends at the tool call, and the throwaway process and fork are cleaned up.
       expect(parts.filter((part) => part.type === "tool-call")).toHaveLength(2)

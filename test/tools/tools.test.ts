@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import type { LanguageModelV3FunctionTool, LanguageModelV3Prompt } from "@ai-sdk/provider"
 import { ToolNames } from "../../src/tools/names.js"
 import { ToolResult } from "../../src/tools/result.js"
-import { ClaudeSystemPrompt } from "../../src/language-model/system-prompt.js"
 
 describe("tool bridge conversion", () => {
   test("names round-trip within Claude's limit, including names that need sanitizing", () => {
@@ -82,40 +81,5 @@ describe("tool bridge conversion", () => {
     })
     expect(image.mcp.content).toEqual([{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }])
     expect(image.replacement).toBeUndefined()
-  })
-
-  test("the preset receives tool context, explicit roles and complete instruction files", () => {
-    const catalog =
-      "# Code Mode\n\nUse execute and search.\n\n## Available tools\n\n- accounts (1 tool) // Customer account tools.\nUse the account ID from search.\n  - tools.accounts.search(): Promise<unknown>\n- example (1 tool)\n  - tools.example.read({\n      path: string,\n    }): Promise<string>\n"
-    const mcp = '<mcp_instructions>\n  <server name="example">Use its documented paths.</server>\n</mcp_instructions>'
-    const skills =
-      "Skills provide specialized instructions and workflows for specific tasks.\n<available_skills><skill>fixture</skill></available_skills>"
-    const instructions =
-      "Instructions from: AGENTS.md\nPROJECT-RULE\n\n## Style\nKeep it readable.\n\nInstructions from: https://example.com/guide.md\nCONFIGURED-RULE"
-    const system = ClaudeSystemPrompt.make(
-      [
-        {
-          role: "system",
-          content: [
-            "GENERIC-OPENCode-PROMPT",
-            catalog,
-            mcp,
-            skills,
-            instructions,
-            "Today's date: Sat Oct 17 2026\n\n<env>OPENCode-ENVIRONMENT</env>",
-          ].join("\n\n"),
-        },
-      ],
-      "CUSTOM-ROLE",
-    )
-    expect(system.preset).toBe("claude_code")
-    expect(system.snapshot).toBe(false)
-    expect(system.append).toContain(catalog.trim())
-    expect(system.append).toContain(mcp)
-    expect(system.append).toContain(skills)
-    expect(system.append).not.toContain("GENERIC-OPENCode-PROMPT")
-    expect(system.append).toContain("CUSTOM-ROLE")
-    expect(system.append).toContain(instructions)
-    expect(system.append).not.toContain("OPENCode-ENVIRONMENT")
   })
 })

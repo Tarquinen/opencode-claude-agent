@@ -65,6 +65,8 @@ interface Entry {
 
 export interface Interface {
   readonly run: (request: Request) => Effect.Effect<void, Error>
+  // OpenCode stopped running the session, so a turn still waiting for tool results will not get them.
+  readonly idle: (sessionID: string) => Effect.Effect<void>
 }
 
 const launch = (request: Request) =>
@@ -103,6 +105,15 @@ export function registry() {
       ),
     )
   }, Effect.uninterruptible)
+
+  const armIdle = Effect.fn("ClaudeSessions.armIdle")(function* (entry: Entry) {
+    if (entry.idle) yield* Fiber.interrupt(entry.idle)
+    entry.idle = yield* Effect.sleep(IDLE_MS).pipe(
+      Effect.andThen(entry.lock.withPermit(stop(entry))),
+      Effect.catch((error) => Effect.logWarning(error)),
+      Effect.forkDetach,
+    )
+  })
 
   const closeEntries = Effect.fn("ClaudeSessions.closeEntries")(function* () {
     for (const entry of [...entries.values(), ...temporary]) {
@@ -324,11 +335,10 @@ export function registry() {
         temporary.delete(entry)
         return
       }
-      entry.idle = yield* Effect.sleep(IDLE_MS).pipe(
-        Effect.andThen(entry.lock.withPermit(stop(entry))),
-        Effect.catch((error) => Effect.logWarning(error)),
-        Effect.forkDetach,
-      )
+      // A turn waiting for tool results is still busy. Subagents, permission prompts and questions can take longer
+      // than IDLE_MS, so idle() starts the timer once OpenCode stops running the session.
+      if (entry.process?.waiting) return
+      yield* armIdle(entry)
     })
 
     const branch = Effect.fn("ClaudeSessions.branch")(function* (
@@ -444,7 +454,15 @@ export function registry() {
         }).pipe(Effect.ensuring(release(entry, request))),
       )
     })
-    return { run } satisfies Interface
+
+    const idle = Effect.fn("ClaudeSessions.idle")(function* (sessionID: string) {
+      const entry = entries.get(sessionID)
+      // Other processes already have a timer, and a running request starts one when it ends.
+      if (!entry?.process?.waiting || entry.active) return
+      yield* armIdle(entry)
+    })
+
+    return { run, idle } satisfies Interface
   })
 
   return { attach, close }

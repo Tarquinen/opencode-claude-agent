@@ -1,7 +1,7 @@
 export * as ConvertClaudeStream from "./convert-claude-stream.js"
 
 import type { LanguageModelV3FunctionTool, LanguageModelV3StreamPart } from "@ai-sdk/provider"
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
+import type { SDKMessage, SDKRateLimitInfo } from "@anthropic-ai/claude-agent-sdk"
 import { ClaudeUsage } from "./usage.js"
 import { ToolNames } from "../tools/names.js"
 import { ClaudeAgentError } from "./claude-agent-error.js"
@@ -14,11 +14,15 @@ export function make(tools: readonly LanguageModelV3FunctionTool[]) {
   let messageID = ""
   let calledTools = false
   let metadata: { "claude-agent": { sessionID: string; messageID: string } } | undefined
+  // Plugins read plan usage from step metadata instead of polling Anthropic for it.
+  let rateLimit: SDKRateLimitInfo | undefined
+  const finishMetadata = () => (rateLimit ? { "claude-agent": { rateLimit } } : undefined)
 
   return (message: SDKMessage): LanguageModelV3StreamPart[] => {
     const parts: LanguageModelV3StreamPart[] = []
     const error = failure(message)
     if (error) return [{ type: "error", error }]
+    if (message.type === "rate_limit_event") rateLimit = message.rate_limit_info
     if (message.type === "stream_event" && message.parent_tool_use_id === null) {
       const event = message.event
       switch (event.type) {
@@ -73,6 +77,7 @@ export function make(tools: readonly LanguageModelV3FunctionTool[]) {
               type: "finish",
               finishReason: { unified: "tool-calls", raw: "tool_use" },
               usage: usage.snapshot(),
+              providerMetadata: finishMetadata(),
             })
           }
           break
@@ -125,6 +130,7 @@ export function make(tools: readonly LanguageModelV3FunctionTool[]) {
           raw: message.stop_reason ?? undefined,
         },
         usage: usage.snapshot(),
+        providerMetadata: finishMetadata(),
       })
     }
     return parts

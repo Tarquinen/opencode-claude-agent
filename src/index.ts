@@ -1,5 +1,5 @@
 import { define } from "@opencode/plugin/effect/plugin"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import { ClaudeIO } from "./claude/io.js"
 import { ClaudeStatus } from "./claude/status.js"
 import { ClaudeSessions } from "./claude/sessions.js"
@@ -22,6 +22,14 @@ export const make = (io: ClaudeIO.Interface, registry = ClaudeSessions.registry(
 
       const status = yield* ClaudeStatus.make(io, () => ClaudeProvider.connection(ctx))
       const sessions = yield* registry.attach({ io, status, storage: ctx.storage, directory: ctx.location.directory })
+      yield* ctx.event
+        .subscribe({
+          types: ["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"],
+        })
+        .pipe(
+          Stream.runForEach((event) => sessions.idle(event.data.sessionID)),
+          Effect.forkScoped({ startImmediately: true }),
+        )
       yield* ClaudeProvider.register(ctx, status, io)
       yield* ClaudeIntegration.register(ctx, status)
       yield* ClaudeAISDK.register(ctx, sessions)

@@ -34,7 +34,10 @@ export const make = Effect.fn("ClaudeStatus.make")(function* (
       Effect.map((probe): State => ({ type: "ready", probe })),
       Effect.catch((error) =>
         Effect.logWarning("Claude Code login check failed", { cause: error.cause }).pipe(
-          Effect.as<State>({ type: "failed", message: String(error.cause) }),
+          Effect.as<State>({
+            type: "failed",
+            message: error.cause instanceof Error ? error.cause.message : String(error.cause),
+          }),
         ),
       ),
     )

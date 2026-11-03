@@ -9,7 +9,7 @@ export interface Model extends ModelInfo {
 }
 
 export interface Result {
-  readonly version: string
+  readonly version: string | undefined
   readonly account: AccountInfo
   readonly models: readonly Model[]
 }
@@ -62,11 +62,11 @@ export const run = Effect.fn("ClaudeProbe.run")(function* (options: Options) {
             orElse: () => Effect.fail(new ProbeError({ cause: new Error("claude did not start within 30 seconds") })),
           }),
         )
-        const error = versionError(init.claude_code_version)
-        if (error) return yield* Effect.fail(new ProbeError({ cause: error }))
-        const version = init.claude_code_version!
+        // No prompt is sent here, so an old Claude Code can still list its models.
+        // The version is checked when a chat starts, and that chat's error tells the user to update.
+        const version = init.claude_code_version
         const models: Model[] = init.models.map((model) => ({ ...model }))
-        if (atLeast(version, CONTEXT_DISCOVERY_VERSION)) yield* discoverContext(session, models)
+        if (version && atLeast(version, CONTEXT_DISCOVERY_VERSION)) yield* discoverContext(session, models)
         return { version, account: init.account, models } satisfies Result
       }),
     (session) =>

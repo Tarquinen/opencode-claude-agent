@@ -22,7 +22,7 @@
     "which": "6.0.1"
   },
   "peerDependencies": {
-    "@opencode/plugin": "^2.0.25 || ^0.0.0-dev",
+    "@opencode/plugin": "^2.2.3 || ^0.0.0-dev",
     "effect": "^4.0.0"
   },
   "peerDependenciesMeta": {
@@ -34,13 +34,13 @@
     }
   },
   "devDependencies": {
-    "@opencode/plugin": "2.0.32",
-    "@opencode/sdk": "2.0.32",
+    "@opencode/plugin": "2.2.5",
+    "@opencode/sdk": "2.2.5",
     "@tsconfig/bun": "1.0.9",
     "@types/bun": "1.4.0",
     "@types/which": "3.0.4",
     "@typescript/native": "npm:typescript@7.0.2",
-    "effect": "4.0.1",
+    "effect": "4.0.6",
     "prettier": "3.6.2",
     "zod": "4.1.8"
   },

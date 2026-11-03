@@ -61,7 +61,7 @@ export const start = Effect.fn(function* (claude: FakeClaude.Fake, saved = stora
     directory: "/tmp/opencode",
   }
   const sessions = yield* registry.attach(input)
-  return { registry, input, model: yield* model(sessions), storage: saved }
+  return { registry, input, sessions, model: yield* model(sessions), storage: saved }
 })
 
 // Direct SDK experiments supply their own tool handlers and read through every step to the result.
