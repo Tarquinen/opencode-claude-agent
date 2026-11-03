@@ -6,7 +6,7 @@ Not intended for release. See [PLAN.md](./PLAN.md) for the research, design and 
 
 ## Install
 
-Requires OpenCode 2.0.25 or newer.
+Requires OpenCode 2.2.3 or newer.
 
 1. Install Claude Code and sign in with `claude auth login` on the machine running OpenCode. An existing login is reused.
 2. Install the plugin:
