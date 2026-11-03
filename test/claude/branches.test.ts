@@ -40,6 +40,29 @@ describe("Claude history branches", () => {
     }),
   )
 
+  it.effect("a branch is forked and deleted in the chat's own Claude config folder", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make([
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn(),
+        FakeClaude.expectInterrupt(),
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn({ recording: "billing-error" }),
+        FakeClaude.expectInterrupt(),
+      ])
+      const test = yield* TestSessions.start(claude)
+      const work = yield* TestSessions.model(test.sessions, { CLAUDE_CONFIG_DIR: "/claude-work" })
+      yield* TestSessions.reply(work, first)
+      yield* TestSessions.reply(work, TestSessions.followup("Summarize"), "session-a", "compaction")
+      expect(claude.forks).toHaveLength(1)
+      expect(claude.forks[0]!.configDir).toBe("/claude-work")
+      // The fake reports a removal from a different folder as an error in check().
+      expect(claude.removed).toEqual([claude.forks[0]!.sessionID])
+      yield* test.registry.close()
+      claude.check()
+    }),
+  )
+
   it.effect("an unsupported attachment in changed history fails with its own message before forking", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make([

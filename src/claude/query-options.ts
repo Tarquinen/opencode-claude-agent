@@ -2,6 +2,8 @@ export * as ClaudeQueryOptions from "./query-options.js"
 
 import type { LanguageModelV3FunctionTool } from "@ai-sdk/provider"
 import type { Options } from "@anthropic-ai/claude-agent-sdk"
+import os from "node:os"
+import path from "node:path"
 import { ToolHooks } from "../tools/hooks.js"
 import type { PendingTools } from "../tools/pending.js"
 import { ToolServer } from "../tools/server.js"
@@ -39,6 +41,13 @@ export function connectionEnv(connection: {
   if (typeof settings.authToken === "string") env.ANTHROPIC_AUTH_TOKEN = settings.authToken
   if (typeof settings.headerTimeout === "number") env.API_TIMEOUT_MS = String(settings.headerTimeout)
   if (typeof settings.chunkTimeout === "number") env.CLAUDE_STREAM_IDLE_TIMEOUT_MS = String(settings.chunkTimeout)
+  // Claude Code does not expand ~, so a configDir like ~/.claude-work would point inside the project.
+  // An absolute path also means Claude Code and our own transcript lookups agree on the folder.
+  if (typeof settings.configDir === "string") {
+    let configDir = settings.configDir
+    if (configDir.startsWith("~/")) configDir = path.join(os.homedir(), configDir.slice(2))
+    env.CLAUDE_CONFIG_DIR = path.resolve(configDir)
+  }
   const headers: string[] = []
   for (const [name, value] of Object.entries(connection.headers ?? {})) {
     headers.push(`${name}: ${value}`)
@@ -83,7 +92,6 @@ export async function session(input: {
   readonly system: NonNullable<Options["systemPrompt"]>
   readonly tools: readonly LanguageModelV3FunctionTool[]
   readonly pending: PendingTools.Interface
-  // Side calls run without saving a transcript
   readonly persist: boolean
   readonly resume?: string
 }): Promise<Options> {

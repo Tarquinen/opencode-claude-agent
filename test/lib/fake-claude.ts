@@ -12,7 +12,6 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk"
 import { Recorder } from "./recorder.js"
 
-// One step of a script. Each `claude` the SDK starts takes the next steps in order.
 interface Gates {
   readonly hold?: Promise<void>
   readonly started: PromiseWithResolvers<void>
@@ -38,6 +37,7 @@ interface Exchange extends Gates {
   readonly beforeResult?: Promise<void>
 }
 
+// Each `claude` the SDK starts takes the next steps in order.
 export type Step = Startup | Input | Exchange
 
 // Replay the protocol exchanges of a recorded tool turn, including Claude-initiated hook/MCP requests.
@@ -81,7 +81,6 @@ function isProbe(args: readonly string[]) {
   return !args.includes("--include-partial-messages")
 }
 
-// Answers the SDK's start-up request with the reply from a recording. With `hold`, the reply waits until it resolves.
 export function expectStartup(input?: {
   readonly recording?: string
   readonly hold?: Promise<void>
@@ -155,7 +154,6 @@ function replies(step: Input, requestID?: string) {
   )
 }
 
-// A start-up reply from a recording, answering the request with the given ID
 function startupResponse(requestID: string, reply: SDKControlInitializeResponse) {
   return {
     type: "control_response",
@@ -163,7 +161,7 @@ function startupResponse(requestID: string, reply: SDKControlInitializeResponse)
   }
 }
 
-// The login probe's recorded no-prompt controls by model, parsed on first use. Chat controls stay in the test's script.
+// Only login checks are answered from this recording. Chat controls stay in the test's script.
 let probeControls: Map<string, any> | undefined
 
 function loadProbeControls() {
@@ -190,7 +188,6 @@ function probeResponse(message: any, model: string | undefined) {
   return { ...reply, response: { ...reply.response, request_id: message.request_id } }
 }
 
-// One `claude` the SDK started: its flags, its environment and every message the SDK wrote to it
 export interface Run {
   readonly args: readonly string[]
   readonly env: Record<string, string | undefined>
@@ -205,7 +202,7 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
   const runs: Run[] = []
   const errors: string[] = []
   const transcripts = new Map<string, SessionMessage[]>()
-  const forks: Array<{ source: string; boundary: string; sessionID: string }> = []
+  const forks: Array<{ source: string; boundary: string; sessionID: string; configDir?: string }> = []
   const removed: string[] = []
   let next = 0
   let completed = 0
@@ -349,7 +346,7 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
     transcripts,
     forks,
     removed,
-    async fork(source: string, boundary: string) {
+    async fork(source: string, boundary: string, configDir?: string) {
       const history = transcripts.get(source) ?? []
       const end = history.findIndex((message) => message.uuid === boundary)
       if (end < 0) return
@@ -361,18 +358,19 @@ export function make(script: readonly Step[], options?: { readonly probes?: bool
         return { ...message, session_id: sessionID, uuid }
       })
       transcripts.set(sessionID, copied)
-      forks.push({ source, boundary, sessionID })
+      forks.push({ source, boundary, sessionID, configDir })
       return { sessionID, messages }
     },
-    async remove(sessionID: string) {
+    async remove(sessionID: string, configDir?: string) {
+      // A fork can only be deleted from the config folder it was written to.
+      const fork = forks.find((fork) => fork.sessionID === sessionID)
+      if (fork && fork.configDir !== configDir) errors.push(`removed ${sessionID} from the wrong config folder`)
       transcripts.delete(sessionID)
       removed.push(sessionID)
     },
     // Resolves when the SDK has requested a step, before any hold is released
     started: (step: Step) => step.started.promise,
-    // Resolves once the fake has finished the step
     reached: (step: Step) => step.done.promise,
-    // Throws if a step never finished, or the SDK wrote something the script didn't expect
     check: () => {
       if (errors.length > 0) throw new Error(errors.join("\n"))
       if (completed < script.length) throw new Error(`${script.length - completed} script steps did not finish`)

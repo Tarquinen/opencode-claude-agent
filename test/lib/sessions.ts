@@ -43,11 +43,13 @@ export function followup(text = "What was the marker? Reply only with it."): Lan
   ]
 }
 
-export const model = Effect.fn(function* (sessions: ClaudeSessions.Interface) {
+export const model = Effect.fn(function* (sessions: ClaudeSessions.Interface, connection?: Record<string, string>) {
   const context = yield* Effect.context<never>()
-  return new ClaudeAgentLanguageModel.Model("haiku", {
-    run: (request, signal) => Effect.runPromiseWith(context)(sessions.run(request), { signal }),
-  })
+  return new ClaudeAgentLanguageModel.Model(
+    "haiku",
+    { run: (request, signal) => Effect.runPromiseWith(context)(sessions.run(request), { signal }) },
+    connection,
+  )
 })
 
 export const start = Effect.fn(function* (claude: FakeClaude.Fake, saved = storage()) {
