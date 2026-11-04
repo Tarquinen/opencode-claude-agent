@@ -17,7 +17,7 @@ describe("Claude history branches", () => {
         FakeClaude.expectTurn(),
         FakeClaude.expectInterrupt(),
         FakeClaude.expectStartup(),
-        FakeClaude.expectTurn({ recording: "billing-error" }),
+        FakeClaude.expectTurn({ recording: "api-error" }),
         FakeClaude.expectInterrupt(),
         FakeClaude.expectStartup(),
         FakeClaude.expectTurn({ index: 1 }),
@@ -28,7 +28,7 @@ describe("Claude history branches", () => {
       const before = yield* SessionRecord.make(test.storage).get("session-a")
       const reply = yield* TestSessions.reply(test.model, TestSessions.followup("Summarize"), "session-a", "compaction")
       const error = reply.find((part) => part.type === "error")
-      expect(String(error?.error)).toContain("extra usage")
+      expect(String(error?.error)).toContain("claude-does-not-exist")
       expect(claude.removed).toEqual([claude.forks[0]!.sessionID])
       expect(yield* SessionRecord.make(test.storage).get("session-a")).toEqual(before)
       expect(TestSessions.text(yield* TestSessions.reply(test.model, TestSessions.followup())).trim()).toBe(
@@ -47,11 +47,11 @@ describe("Claude history branches", () => {
         FakeClaude.expectTurn(),
         FakeClaude.expectInterrupt(),
         FakeClaude.expectStartup(),
-        FakeClaude.expectTurn({ recording: "billing-error" }),
+        FakeClaude.expectTurn({ recording: "api-error" }),
         FakeClaude.expectInterrupt(),
       ])
       const test = yield* TestSessions.start(claude)
-      const work = yield* TestSessions.model(test.sessions, { CLAUDE_CONFIG_DIR: "/claude-work" })
+      const work = yield* TestSessions.model(test.sessions, { configDir: "/claude-work" })
       yield* TestSessions.reply(work, first)
       yield* TestSessions.reply(work, TestSessions.followup("Summarize"), "session-a", "compaction")
       expect(claude.forks).toHaveLength(1)

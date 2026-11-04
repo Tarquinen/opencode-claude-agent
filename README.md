@@ -53,3 +53,32 @@ To update, run `opencode plugin update github:Tarquinen/opencode-claude-agent`. 
    ```
 
 3. In `/models`, choose **Sonnet (Claude 2)** or **Opus (Claude 2)** for the second account. The original entries still use your usual login.
+
+To use one account for every model in a project, such as a work account, set `configDir` for the provider in that project's `opencode.json` instead:
+
+```json
+{ "providers": { "claude-agent": { "settings": { "configDir": "~/.claude-work" } } } }
+```
+
+## Rotate between accounts
+
+If you have several interchangeable accounts, OpenCode can move chats between them as they hit usage limits.
+
+1. Sign in to each account in its own folder:
+
+   ```sh
+   CLAUDE_CONFIG_DIR="$HOME/.claude-1" claude auth login
+   CLAUDE_CONFIG_DIR="$HOME/.claude-2" claude auth login
+   ```
+
+2. List the folders as `configDir` in your `opencode.json`:
+
+   ```json
+   {
+     "providers": {
+       "claude-agent": {
+         "settings": { "configDir": ["~/.claude-1", "~/.claude-2"] }
+       }
+     }
+   }
+   ```

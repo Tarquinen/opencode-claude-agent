@@ -101,7 +101,7 @@ describe("Claude sessions", () => {
         FakeClaude.expectInterrupt(),
       ])
       const test = yield* TestSessions.start(claude)
-      const work = yield* TestSessions.model(test.sessions, { CLAUDE_CONFIG_DIR: "/home/dan/.claude-work" })
+      const work = yield* TestSessions.model(test.sessions, { configDir: "/home/dan/.claude-work" })
       yield* TestSessions.reply(test.model, first)
       const id = claude.runs[0]!.args.find((arg) => arg.startsWith("--session-id="))!.split("=")[1]
       const prompt = TestSessions.followup()
