@@ -2,11 +2,9 @@ export * as ClaudeAgentError from "./claude-agent-error.js"
 
 import type { SDKAssistantMessageError, SDKMessage, SDKRateLimitInfo } from "@anthropic-ai/claude-agent-sdk"
 
-// Keeps what Claude Code reported, so callers can tell a limit or a missing login from other failures.
 export class Failure extends Error {
   constructor(
     message: string,
-    readonly code: SDKAssistantMessageError | undefined,
     // A subscription limit refused the request, rather than an API error that Claude Code already retried.
     readonly limited: boolean,
   ) {
@@ -46,8 +44,8 @@ export function make() {
     const billing = code === "billing_error" ? " Check your Claude plan and extra-usage settings." : ""
     const text = limit + reset + billing
 
-    if (text) return new Failure(text, code, limited)
-    if (status) return new Failure(`Claude Code could not finish its reply (HTTP ${status})`, code, limited)
-    return new Failure("Claude Code could not finish its reply", code, limited)
+    if (text) return new Failure(text, limited)
+    if (status) return new Failure(`Claude Code could not finish its reply (HTTP ${status})`, limited)
+    return new Failure("Claude Code could not finish its reply", limited)
   }
 }

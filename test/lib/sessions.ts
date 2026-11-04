@@ -15,7 +15,6 @@ import type { SessionRecord } from "../../src/sync/record.js"
 import { FakeClaude } from "./fake-claude.js"
 import { FakeIO } from "./fake-io.js"
 
-// Like the plugin's storage, it holds session records and the account each chat uses.
 export function storage() {
   const data = new Map<string, unknown>()
   const ids = new Set<string>()
@@ -50,7 +49,6 @@ export function followup(text = "What was the marker? Reply only with it."): Lan
 export const model = (sessions: ClaudeSessions.Interface, settings?: Record<string, unknown>) =>
   build((request) => sessions.run(request), settings)
 
-// Like the plugin, runs through ClaudeAccounts, so a `configDir` list rotates between those folders.
 export const rotating = (accounts: ClaudeAccounts.Interface, settings?: Record<string, unknown>) => {
   const configDirs = ClaudeQueryOptions.configDirs(settings?.configDir)
   return build((request) => accounts.run(request, configDirs), settings)

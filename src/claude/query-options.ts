@@ -41,7 +41,7 @@ export function connectionEnv(connection: {
   if (typeof settings.authToken === "string") env.ANTHROPIC_AUTH_TOKEN = settings.authToken
   if (typeof settings.headerTimeout === "number") env.API_TIMEOUT_MS = String(settings.headerTimeout)
   if (typeof settings.chunkTimeout === "number") env.CLAUDE_STREAM_IDLE_TIMEOUT_MS = String(settings.chunkTimeout)
-  // With several folders, chats rotate between them and everything else uses the first.
+  // ClaudeAccounts picks the folder for each request. The login check and model list use the first.
   const dirs = configDirs(settings.configDir)
   if (dirs.length > 0) env.CLAUDE_CONFIG_DIR = dirs[0]
   const headers: string[] = []
@@ -55,7 +55,6 @@ export function connectionEnv(connection: {
   return env
 }
 
-// configDir is one Claude config folder, or a list of folders whose logins chats rotate between.
 export function configDirs(value: unknown) {
   const dirs: string[] = []
   for (const item of Array.isArray(value) ? value : [value]) {
