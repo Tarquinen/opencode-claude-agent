@@ -4,6 +4,8 @@ import type { LanguageModelV3FunctionTool, LanguageModelV3Prompt, LanguageModelV
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { SessionRequestKind } from "@opencode/plugin/effect/session"
 import { Effect } from "effect"
+import { ClaudeAccounts } from "../../src/claude/accounts.js"
+import { ClaudeQueryOptions } from "../../src/claude/query-options.js"
 import type { ClaudeSession } from "../../src/claude/session.js"
 import { ClaudeSessions } from "../../src/claude/sessions.js"
 import { ClaudeStatus } from "../../src/claude/status.js"
@@ -13,6 +15,7 @@ import type { SessionRecord } from "../../src/sync/record.js"
 import { FakeClaude } from "./fake-claude.js"
 import { FakeIO } from "./fake-io.js"
 
+// Like the plugin's storage, it holds session records and the account each chat uses.
 export function storage() {
   const data = new Map<string, unknown>()
   const ids = new Set<string>()
@@ -20,10 +23,10 @@ export function storage() {
     data,
     ids,
     get: (key: string) => Effect.sync(() => data.get(key)),
-    set: (key: string, value: SessionRecord.Record) =>
+    set: (key: string, value: SessionRecord.Record | string) =>
       Effect.sync(() => {
         data.set(key, value)
-        ids.add(value.claudeSessionID)
+        if (typeof value !== "string") ids.add(value.claudeSessionID)
       }),
   }
 }
@@ -43,16 +46,33 @@ export function followup(text = "What was the marker? Reply only with it."): Lan
   ]
 }
 
-export const model = Effect.fn(function* (sessions: ClaudeSessions.Interface, connection?: Record<string, string>) {
+// `settings` are the provider settings from opencode.json, such as `configDir`.
+export const model = (sessions: ClaudeSessions.Interface, settings?: Record<string, unknown>) =>
+  build((request) => sessions.run(request), settings)
+
+// Like the plugin, runs through ClaudeAccounts, so a `configDir` list rotates between those folders.
+export const rotating = (accounts: ClaudeAccounts.Interface, settings?: Record<string, unknown>) => {
+  const configDirs = ClaudeQueryOptions.configDirs(settings?.configDir)
+  return build((request) => accounts.run(request, configDirs), settings)
+}
+
+const build = Effect.fn(function* (
+  run: (request: ClaudeSessions.Request) => Effect.Effect<void, Error>,
+  settings?: Record<string, unknown>,
+) {
   const context = yield* Effect.context<never>()
   return new ClaudeAgentLanguageModel.Model(
     "haiku",
-    { run: (request, signal) => Effect.runPromiseWith(context)(sessions.run(request), { signal }) },
-    connection,
+    { run: (request, signal) => Effect.runPromiseWith(context)(run(request), { signal }) },
+    ClaudeQueryOptions.connectionEnv({ settings }),
   )
 })
 
-export const start = Effect.fn(function* (claude: FakeClaude.Fake, saved = storage()) {
+export const start = Effect.fn(function* (
+  claude: FakeClaude.Fake,
+  saved = storage(),
+  settings?: Record<string, unknown>,
+) {
   const registry = ClaudeSessions.registry()
   yield* Effect.addFinalizer(() => registry.close())
   const io = FakeIO.make({ claude })
@@ -63,7 +83,8 @@ export const start = Effect.fn(function* (claude: FakeClaude.Fake, saved = stora
     directory: "/tmp/opencode",
   }
   const sessions = yield* registry.attach(input)
-  return { registry, input, sessions, model: yield* model(sessions), storage: saved }
+  const accounts = ClaudeAccounts.make({ sessions, storage: saved })
+  return { registry, input, sessions, accounts, model: yield* rotating(accounts, settings), storage: saved }
 })
 
 // Direct SDK experiments supply their own tool handlers and read through every step to the result.

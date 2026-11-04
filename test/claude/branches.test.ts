@@ -51,7 +51,7 @@ describe("Claude history branches", () => {
         FakeClaude.expectInterrupt(),
       ])
       const test = yield* TestSessions.start(claude)
-      const work = yield* TestSessions.model(test.sessions, { CLAUDE_CONFIG_DIR: "/claude-work" })
+      const work = yield* TestSessions.model(test.sessions, { configDir: "/claude-work" })
       yield* TestSessions.reply(work, first)
       yield* TestSessions.reply(work, TestSessions.followup("Summarize"), "session-a", "compaction")
       expect(claude.forks).toHaveLength(1)
