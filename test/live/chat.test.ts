@@ -257,4 +257,35 @@ describe.skipIf(!live)("chat against real Claude", () => {
       }),
     60_000,
   )
+
+  // A model that doesn't exist is an API error we can record on demand.
+  it.live(
+    "an API error ends the turn with Claude Code's message",
+    () =>
+      Effect.gen(function* () {
+        const directory = yield* TestOpenCode.tempDirectory
+        const recorder = Recorder.make("api-error")
+        const registry = ClaudeSessions.registry()
+        yield* Effect.addFinalizer(() => registry.close().pipe(Effect.andThen(Effect.sync(() => recorder.save()))))
+        const sessions = yield* registry.attach({
+          io: { ...ClaudeIO.real, spawn: recorder.spawn },
+          status: yield* ClaudeStatus.make(ClaudeIO.real, () => Effect.succeed({})),
+          storage: TestSessions.storage(),
+          directory,
+        })
+        const haiku = yield* TestSessions.model(sessions)
+        const missing = new ClaudeAgentLanguageModel.Model("claude-does-not-exist", haiku.dependencies)
+        // No session ID: the SDK runs without persisting a transcript.
+        const result = yield* Effect.promise(() =>
+          missing.doStream({
+            prompt: TestSessions.prompt("Reply only with OK."),
+            headers: { [RequestKind.HEADER]: "primary" },
+          }),
+        )
+        const parts = yield* Effect.tryPromise(() => TestSessions.collect(result.stream))
+        expect(String(parts.find((part) => part.type === "error")?.error)).toContain("claude-does-not-exist")
+        expect(TestSessions.text(parts)).toBe("")
+      }),
+    60_000,
+  )
 })

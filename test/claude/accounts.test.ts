@@ -15,7 +15,7 @@ const resetsAt = 1792800000
 
 // A recorded failed turn, rewritten into the messages Claude Code sends when a subscription limit refuses it.
 function limitTurn() {
-  const turn = FakeClaude.expectTurn({ recording: "billing-error" })
+  const turn = FakeClaude.expectTurn({ recording: "api-error" })
   const replies: SDKMessage[] = []
   for (const message of turn.replies as SDKMessage[]) {
     if (message.type === "assistant" && message.error) {
@@ -29,7 +29,8 @@ function limitTurn() {
       continue
     }
     if (message.type === "result" && message.subtype === "success") {
-      replies.push({ ...message, is_error: true, result: "You've hit your limit", api_error_status: 429 })
+      const result = "You've hit your weekly limit · resets Mon 12:00am"
+      replies.push({ ...message, is_error: true, result, api_error_status: 429 })
       continue
     }
     replies.push(message)
