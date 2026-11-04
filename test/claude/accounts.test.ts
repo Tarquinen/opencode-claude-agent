@@ -208,6 +208,27 @@ describe("Claude accounts", () => {
     }),
   )
 
+  it.effect("a failure that is not a limit is shown without trying another account or moving the chat", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make([
+        FakeClaude.expectStartup(),
+        limitTurn(),
+        FakeClaude.expectInterrupt(),
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn({ recording: "api-error" }),
+        FakeClaude.expectInterrupt(),
+      ])
+      const test = yield* TestSessions.start(claude, TestSessions.storage(), pool)
+      const parts = yield* TestSessions.reply(test.model, first)
+      expect(String(parts.find((part) => part.type === "error")?.error)).toContain("claude-does-not-exist")
+      expect(claude.runs.map((run) => run.env.CLAUDE_CONFIG_DIR)).toEqual(["/accounts/a", "/accounts/b"])
+      expect(test.storage.data.has("accounts/session-a")).toBe(false)
+      expect(test.storage.data.has("last-account")).toBe(false)
+      yield* test.registry.close()
+      claude.check()
+    }),
+  )
+
   it.effect("a logged-out account fails with the command to log in to its folder, without moving on", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make([

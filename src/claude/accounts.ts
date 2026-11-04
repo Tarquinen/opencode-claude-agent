@@ -45,15 +45,16 @@ export function make(input: { readonly sessions: ClaudeSessions.Interface; reado
         connection: { ...connection, CLAUDE_CONFIG_DIR: dir },
         emit: attempt.emit,
       })
-      if (!attempt.refused()) {
+      const error = attempt.error()
+      if (!error) {
         // A side call never moves its chat, because the side call's model may have hit a limit of its own.
         if (request.sessionID && dir !== own) yield* input.storage.set(`accounts/${request.sessionID}`, dir)
         if (dir !== last) yield* input.storage.set(LAST, dir)
         attempt.flush()
         return
       }
-      // A retry after Claude has shown output would repeat that output.
-      if (attempt.shown() || i === dirs.length - 1) {
+      // Only a limit is worth another account. A retry after Claude has shown output would repeat that output.
+      if (!error.limited || attempt.shown() || i === dirs.length - 1) {
         attempt.flush()
         return
       }
@@ -70,7 +71,7 @@ export function make(input: { readonly sessions: ClaudeSessions.Interface; reado
 function watch(emit: (message: SDKMessage) => void) {
   const failure = ClaudeAgentError.make()
   let held: SDKMessage[] | undefined = []
-  let refused = false
+  let error: ClaudeAgentError.Failure | undefined
 
   const flush = () => {
     if (!held) return
@@ -81,7 +82,8 @@ function watch(emit: (message: SDKMessage) => void) {
 
   return {
     emit(message: SDKMessage) {
-      if (failure(message)?.limited) refused = true
+      const failed = failure(message)
+      if (failed) error = failed
       if (!held) {
         emit(message)
         return
@@ -96,6 +98,6 @@ function watch(emit: (message: SDKMessage) => void) {
     },
     flush,
     shown: () => held === undefined,
-    refused: () => refused,
+    error: () => error,
   }
 }
