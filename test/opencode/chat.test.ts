@@ -148,6 +148,7 @@ describe("embedded text chat", () => {
           expect(calls[0]!.received.filter((message) => message.type === "user")).toHaveLength(2)
           expect(calls[0]!.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBeUndefined()
           expect(calls[0]!.env.DISABLE_AUTO_COMPACT).toBe("1")
+          expect(calls[0]!.env.CLAUDE_CODE_ENTRYPOINT).toBe("opencode")
           return session.id
         }).pipe(Effect.scoped)
         yield* before.close()

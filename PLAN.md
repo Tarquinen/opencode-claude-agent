@@ -240,6 +240,7 @@ Notes:
 - Claude Code's own instruction-file loading stays off, so opencode's instruction files reach Claude only once.
 - Claude Code supplies its own base instructions and environment context. Its runtime also adds an SDK introduction and a reminder holding the user's account email. We do not duplicate opencode's environment block in the chat system prompt.
 - `--bare` / `CLAUDE_CODE_SIMPLE` must stay off. It skips OAuth, so the subscription wouldn't work.
+- env `CLAUDE_CODE_ENTRYPOINT=opencode` labels requests as opencode's. With the SDK's default `sdk-ts`, the same tokens use the 5-hour plan limit about 1.8x faster ([anthropics/claude-code#97074](https://github.com/anthropics/claude-code/issues/97074)). It replaces any label inherited from the shell, such as `sdk-cli` when opencode starts inside Claude Code.
 - Claude Code's start-up reply still lists the user's own skills and commands from `~/.claude`, but with these settings the model doesn't see them (checked live against CC 2.1.301).
 
 ### Things that need translating
