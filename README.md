@@ -64,11 +64,10 @@ To use one account for every model in a project, such as a work account, set `co
 
 If you have several interchangeable accounts, OpenCode can move chats between them as they hit usage limits.
 
-1. Sign in to each account in its own folder:
+1. Sign in to each extra account in its own folder. Your existing login in `~/.claude` can stay as it is:
 
    ```sh
    CLAUDE_CONFIG_DIR="$HOME/.claude-1" claude auth login
-   CLAUDE_CONFIG_DIR="$HOME/.claude-2" claude auth login
    ```
 
 2. List the folders as `configDir` in your `opencode.json`:
@@ -77,7 +76,7 @@ If you have several interchangeable accounts, OpenCode can move chats between th
    {
      "providers": {
        "claude-agent": {
-         "settings": { "configDir": ["~/.claude-1", "~/.claude-2"] }
+         "settings": { "configDir": ["~/.claude", "~/.claude-1"] }
        }
      }
    }
