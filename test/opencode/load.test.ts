@@ -46,6 +46,26 @@ describe("loading the plugin", () => {
     }),
   )
 
+  it.live("lists a model that Claude Code names by its version under its family alias", () =>
+    Effect.gen(function* () {
+      const steps = FakeClaude.replay("startup")
+      const startup = steps[0]
+      if (startup?.type !== "startup") throw new Error("Missing startup recording")
+      // Through a custom base URL, Claude Code lists Fable by the version it currently resolves to
+      const fable = startup.reply.models.find((model) => model.value === "fable")!
+      fable.value = "claude-fable-5-2[1m]"
+      fable.displayName = "Fable"
+      const claude = FakeClaude.make(steps)
+      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }) })
+      yield* TestOpenCode.connect(test.opencode)
+      yield* Effect.promise(() => claude.reached(steps.at(-1)!))
+      const ids = yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.length > 0)
+      expect(ids).toContain("fable")
+      expect(ids).not.toContain("claude-fable-5-2[1m]")
+      claude.check()
+    }),
+  )
+
   it.live("restarts with the saved models without running claude", () =>
     Effect.gen(function* () {
       const directory = yield* TestOpenCode.tempDirectory
