@@ -72,6 +72,16 @@ export function configDirs(value: unknown) {
   return dirs
 }
 
+// Claude Code keeps its state in ~/.claude.json only while CLAUDE_CONFIG_DIR is unset. Naming the default folder moves
+// that to ~/.claude/.claude.json, which can hold an older model list, so the default folder is used by not naming it.
+export function withoutDefaultFolder(connection: Readonly<Record<string, string>>, io: ClaudeIO.Interface) {
+  if (connection.CLAUDE_CONFIG_DIR !== path.join(os.homedir(), ".claude")) return connection
+  // With the variable already set for opencode, leaving it out would run that folder instead.
+  if (io.env().CLAUDE_CONFIG_DIR !== undefined) return connection
+  const { CLAUDE_CONFIG_DIR: _, ...rest } = connection
+  return rest
+}
+
 export function base(input: {
   executable: string
   io: ClaudeIO.Interface

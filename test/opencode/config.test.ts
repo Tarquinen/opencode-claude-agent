@@ -67,6 +67,27 @@ describe("opencode provider config", () => {
     }),
   )
 
+  it.live("runs the default folder without naming it, so Claude Code keeps its usual state file", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make(
+        [FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt()],
+        { probes: true },
+      )
+      const test = yield* TestOpenCode.start({
+        io: FakeIO.make({ claude }),
+        config: { providers: { "claude-agent": { settings: { configDir: ["~/.claude", "~/.claude-1"] } } } },
+      })
+      yield* TestOpenCode.connect(test.opencode)
+      yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.includes("sonnet"))
+      yield* test.opencode.generate.text({
+        prompt: "hello",
+        model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }),
+      })
+      expect(claude.runs.map((run) => run.env.CLAUDE_CONFIG_DIR)).toEqual([undefined, undefined])
+      claude.check()
+    }),
+  )
+
   it.live("leaves the user's environment alone when nothing is configured", () =>
     Effect.gen(function* () {
       const onConnect = FakeClaude.expectStartup()
