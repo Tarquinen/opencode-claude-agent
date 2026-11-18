@@ -1,8 +1,9 @@
 import { describe, expect } from "bun:test"
 import type { SDKControlInitializeResponse } from "@anthropic-ai/claude-agent-sdk"
-import { Model } from "@opencode/plugin/effect"
+import { Location, Model } from "@opencode/plugin/effect"
 import path from "node:path"
 import { Effect } from "effect"
+import { ClaudeSessions } from "../../src/claude/sessions.js"
 import { ClaudeProvider } from "../../src/plugin/provider.js"
 import { it } from "../lib/effect.js"
 import { FakeClaude } from "../lib/fake-claude.js"
@@ -68,6 +69,54 @@ describe("loading the plugin", () => {
         models.data.find((model) => model.providerID === ClaudeProvider.ID && model.id === "opus")?.limit.context,
       ).toBe(1_000_000)
       expect(claude.runs).toHaveLength(0)
+    }),
+  )
+
+  it.live("checks context sizes for models a chat reports without one", () =>
+    Effect.gen(function* () {
+      const directory = yield* TestOpenCode.tempDirectory
+      const database = path.join(directory, "opencode.db")
+      yield* Effect.gen(function* () {
+        const steps = FakeClaude.replay("startup")
+        const context = steps.find(
+          (step) => step.type === "exchange" && step.input.request?.subtype === "get_context_usage",
+        )
+        if (context?.type !== "exchange") throw new Error("Missing context recording")
+        context.replies[0].response.response.rawMaxTokens = 0
+        const claude = FakeClaude.make(steps)
+        const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), directory, database })
+        yield* TestOpenCode.connect(test.opencode)
+        yield* Effect.promise(() => claude.reached(steps.at(-1)!))
+        yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.length > 0)
+        claude.check()
+      }).pipe(Effect.scoped)
+
+      const claude = FakeClaude.make(
+        [FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt()],
+        { probes: true },
+      )
+      const registry = ClaudeSessions.registry()
+      yield* Effect.addFinalizer(() => registry.close())
+      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), registry, directory, database })
+      const opus = test.opencode.model
+        .list({ location: { directory: Location.PublicRef.fields.directory.make(test.directory) } })
+        .pipe(
+          Effect.map(
+            (models) =>
+              models.data.find((model) => model.providerID === ClaudeProvider.ID && model.id === "opus")?.limit.context,
+          ),
+        )
+      expect(yield* opus).toBe(200_000)
+      const session = yield* test.opencode.session.create({
+        title: "Context test",
+        location: { directory: Location.PublicRef.fields.directory.make(test.directory) },
+        model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }),
+      })
+      yield* test.opencode.session.prompt({ sessionID: session.id, text: "hello" })
+      yield* test.opencode.session.wait({ sessionID: session.id })
+      yield* TestOpenCode.waitUntil(opus, (context) => context === 1_000_000)
+      yield* registry.close()
+      claude.check()
     }),
   )
 
