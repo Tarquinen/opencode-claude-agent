@@ -46,22 +46,37 @@ describe("loading the plugin", () => {
     }),
   )
 
-  it.live("lists a model that Claude Code names by its version under its family alias", () =>
+  it.live("keeps a saved model ID usable when Claude Code lists the model under another name", () =>
     Effect.gen(function* () {
-      const steps = FakeClaude.replay("startup")
-      const startup = steps[0]
-      if (startup?.type !== "startup") throw new Error("Missing startup recording")
-      // Through a custom base URL, Claude Code lists Fable by the version it currently resolves to
-      const fable = startup.reply.models.find((model) => model.value === "fable")!
-      fable.value = "claude-fable-5-2[1m]"
-      fable.displayName = "Fable"
-      const claude = FakeClaude.make(steps)
-      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }) })
+      const directory = yield* TestOpenCode.tempDirectory
+      const database = path.join(directory, "opencode.db")
+      // Claude Code lists Fable under the name a chat was started with: first by its version, then as `fable`
+      const version = FakeClaude.expectStartup()
+      const alias = FakeClaude.expectStartup()
+      const drop = (startup: typeof version, id: string) =>
+        startup.reply.models.splice(
+          startup.reply.models.findIndex((model) => model.value === id),
+          1,
+        )
+      drop(version, "fable")
+      drop(alias, "claude-fable-5")
+      alias.reply.models.find((model) => model.value === "fable")!.resolvedModel = "claude-fable-5"
+
+      yield* Effect.gen(function* () {
+        const claude = FakeClaude.make([version])
+        const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), directory, database })
+        yield* TestOpenCode.connect(test.opencode)
+        yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.includes("claude-fable-5"))
+      }).pipe(Effect.scoped)
+
+      const claude = FakeClaude.make([alias])
+      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), directory, database })
       yield* TestOpenCode.connect(test.opencode)
-      yield* Effect.promise(() => claude.reached(steps.at(-1)!))
-      const ids = yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.length > 0)
-      expect(ids).toContain("fable")
-      expect(ids).not.toContain("claude-fable-5-2[1m]")
+      const models = yield* TestOpenCode.waitUntil(test.opencode.model.list(), (models) =>
+        models.data.some((model) => model.id === "fable"),
+      )
+      expect(models.data.find((model) => model.id === "claude-fable-5")?.status).toBe("active")
+      expect(models.data.find((model) => model.id === "fable")?.status).toBe("deprecated")
       claude.check()
     }),
   )
