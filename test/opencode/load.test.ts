@@ -46,23 +46,77 @@ describe("loading the plugin", () => {
     }),
   )
 
-  it.live("lists a model that Claude Code names by its version under its family alias", () =>
+  it.live("keeps every listed model ID usable when Claude Code renames a model or stops listing one", () =>
     Effect.gen(function* () {
-      const steps = FakeClaude.replay("startup")
-      const startup = steps[0]
-      if (startup?.type !== "startup") throw new Error("Missing startup recording")
-      // Through a custom base URL, Claude Code lists Fable by the version it currently resolves to
-      const fable = startup.reply.models.find((model) => model.value === "fable")!
-      fable.value = "claude-fable-5-2[1m]"
-      fable.displayName = "Fable"
-      const claude = FakeClaude.make(steps)
-      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }) })
-      yield* TestOpenCode.connect(test.opencode)
-      yield* Effect.promise(() => claude.reached(steps.at(-1)!))
-      const ids = yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.length > 0)
-      expect(ids).toContain("fable")
-      expect(ids).not.toContain("claude-fable-5-2[1m]")
+      const saved = yield* connected
+      // Claude Code lists Fable under the name a chat was started with. This account's list also lacks an old model.
+      const listed = yield* afterChat(saved, "claude-fable-5-1", (models) => {
+        models.find((model) => model.value === "fable")!.value = "claude-fable-5-1"
+        remove(models, "claude-opus-4-6")
+      })
+      // The saved ID stays the one offered, and the others still run chats without showing in the picker
+      expect(listed.get("fable")).toBe("active")
+      expect(listed.get("claude-fable-5-1")).toBe("deprecated")
+      expect(listed.get("claude-opus-4-6")).toBe("deprecated")
+    }),
+  )
+
+  it.live("a project folder that loaded earlier keeps the IDs another folder saved since", () =>
+    Effect.gen(function* () {
+      const saved = yield* connected
+      const other = yield* TestOpenCode.tempDirectory
+      const first = FakeClaude.expectStartup()
+      first.reply.models.find((model) => model.value === "fable")!.value = "claude-fable-5-1"
+      const second = FakeClaude.expectStartup()
+      remove(second.reply.models, "claude-opus-4-6")
+      const claude = FakeClaude.make(
+        [
+          first,
+          FakeClaude.expectTurn(),
+          second,
+          FakeClaude.expectTurn(),
+          FakeClaude.expectInterrupt(),
+          FakeClaude.expectInterrupt(),
+        ],
+        { probes: true },
+      )
+      const registry = ClaudeSessions.registry()
+      yield* Effect.addFinalizer(() => registry.close())
+      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), registry, ...saved })
+      const ids = (directory: string) =>
+        test.opencode.model
+          .list({ location: { directory: Location.PublicRef.fields.directory.make(directory) } })
+          .pipe(Effect.map((list) => list.data.map((model) => String(model.id))))
+      const chat = Effect.fn(function* (directory: string) {
+        const session = yield* test.opencode.session.create({
+          title: "Model list test",
+          location: { directory: Location.PublicRef.fields.directory.make(directory) },
+          model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }),
+        })
+        yield* test.opencode.session.prompt({ sessionID: session.id, text: "hello" })
+        yield* test.opencode.session.wait({ sessionID: session.id })
+      })
+      // The other folder loads the saved list before the first folder adds an ID to it
+      expect(yield* ids(other)).not.toContain("claude-fable-5-1")
+      yield* chat(saved.directory)
+      yield* TestOpenCode.waitUntil(ids(saved.directory), (ids) => ids.includes("claude-fable-5-1"))
+      yield* chat(other)
+      const listed = yield* TestOpenCode.waitUntil(ids(other), (ids) => ids.includes("claude-fable-5-1"))
+      expect(listed).toContain("claude-opus-4-6")
+      yield* registry.close()
       claude.check()
+    }),
+  )
+
+  it.live("offers a model under its first ID again after a list that lacked it", () =>
+    Effect.gen(function* () {
+      const saved = yield* connected
+      yield* afterChat(saved, "fable", (models) => remove(models, "fable"))
+      const back = yield* afterChat(saved, "claude-fable-5-1[1m]", (models) => {
+        models.find((model) => model.value === "fable")!.value = "claude-fable-5-1[1m]"
+      })
+      expect(back.get("fable")).toBe("active")
+      expect(back.get("claude-fable-5-1[1m]")).toBe("deprecated")
     }),
   )
 
@@ -210,3 +264,65 @@ describe("loading the plugin", () => {
     }),
   )
 })
+
+type Saved = { readonly directory: string; readonly database: string }
+
+// A folder and database whose saved model list is the recorded one
+const connected = Effect.gen(function* () {
+  const directory = yield* TestOpenCode.tempDirectory
+  const database = path.join(directory, "opencode.db")
+  yield* Effect.gen(function* () {
+    const steps = FakeClaude.replay("startup")
+    const claude = FakeClaude.make(steps)
+    const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), directory, database })
+    yield* TestOpenCode.connect(test.opencode)
+    yield* Effect.promise(() => claude.reached(steps.at(-1)!))
+    yield* TestOpenCode.waitUntil(TestOpenCode.models(test.opencode), (ids) => ids.length > 0)
+    claude.check()
+  }).pipe(Effect.scoped)
+  return { directory, database }
+})
+
+// Restarts opencode and runs a chat whose Claude Code process reports the edited list. Answers each model's status
+// once the list shows `changed` differently.
+const afterChat = (saved: Saved, changed: string, edit: (models: SDKControlInitializeResponse["models"]) => void) =>
+  Effect.gen(function* () {
+    const startup = FakeClaude.expectStartup()
+    edit(startup.reply.models)
+    const claude = FakeClaude.make([startup, FakeClaude.expectTurn(), FakeClaude.expectInterrupt()], { probes: true })
+    const registry = ClaudeSessions.registry()
+    yield* Effect.addFinalizer(() => registry.close())
+    const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), registry, ...saved })
+    const location = { directory: Location.PublicRef.fields.directory.make(test.directory) }
+    const statuses = test.opencode.model
+      .list({ location })
+      .pipe(
+        Effect.map(
+          (list) =>
+            new Map(
+              list.data
+                .filter((model) => model.providerID === ClaudeProvider.ID)
+                .map((model) => [String(model.id), model.status]),
+            ),
+        ),
+      )
+    const before = (yield* statuses).get(changed)
+    const session = yield* test.opencode.session.create({
+      title: "Model list test",
+      location,
+      model: Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") }),
+    })
+    yield* test.opencode.session.prompt({ sessionID: session.id, text: "hello" })
+    yield* test.opencode.session.wait({ sessionID: session.id })
+    const listed = yield* TestOpenCode.waitUntil(statuses, (listed) => listed.get(changed) !== before)
+    yield* registry.close()
+    claude.check()
+    return listed
+  }).pipe(Effect.scoped)
+
+function remove(models: SDKControlInitializeResponse["models"], id: string) {
+  models.splice(
+    models.findIndex((model) => model.value === id),
+    1,
+  )
+}
