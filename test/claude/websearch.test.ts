@@ -11,6 +11,8 @@ test("web search lists one copy of a page, in the first copy's place, under its 
     "https://developer.chrome.com/docs/x.md.txt",
     "https://developer.chrome.com/docs/x?hl=en",
     "https://developer.chrome.com/docs/y",
+    "https://github.com/go/example",
+    "https://github.com/js/example",
   ]
   const found = ClaudeWebSearch.results({
     type: "user",
@@ -23,5 +25,7 @@ test("web search lists one copy of a page, in the first copy's place, under its 
     "https://other.example/x",
     "https://developer.chrome.com/docs/x?hl=en",
     "https://developer.chrome.com/docs/y",
+    "https://github.com/go/example",
+    "https://github.com/js/example",
   ])
 })

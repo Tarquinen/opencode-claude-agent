@@ -64,6 +64,12 @@ export const search = Effect.fn("ClaudeWebSearch.search")(function* (input: {
       }),
     // Closing as soon as the results arrive skips Claude's own answer. The model that asked reads the results itself.
     (session) => Effect.sync(() => session.close()),
+  ).pipe(
+    // opencode sets no limit on a search provider, so a stuck claude would hold the tool call forever
+    Effect.timeoutOrElse({
+      duration: "1 minute",
+      orElse: () => Effect.fail(new Error("Claude did not finish the web search within a minute")),
+    }),
   )
 })
 
@@ -98,6 +104,8 @@ export function results(message: SDKMessage): WebSearch.Result[] | undefined {
   return found
 }
 
+const LANGUAGES = new Intl.DisplayNames(["en"], { type: "language", fallback: "none" })
+
 // Claude's search often lists one page many times: translated copies (/de/..., ?hl=fr), account variants
 // (?authuser=2) and Markdown mirrors (page.md.txt). They share one key.
 function page(url: string) {
@@ -105,6 +113,9 @@ function page(url: string) {
   if (!parsed) return url
   parsed.searchParams.delete("hl")
   parsed.searchParams.delete("authuser")
-  parsed.pathname = parsed.pathname.replace(/^\/[a-z]{2}(-[a-z]{2,4})?(?=\/)/i, "").replace(/\.md\.txt$/, "")
+  parsed.pathname = parsed.pathname
+    // A two-letter folder is a locale only when it names a language: /de/ does, /go/ and /js/ don't
+    .replace(/^\/([a-z]{2})(-[a-z]{2,4})?(?=\/)/i, (folder, language) => (LANGUAGES.of(language) ? "" : folder))
+    .replace(/\.md\.txt$/, "")
   return parsed.href
 }

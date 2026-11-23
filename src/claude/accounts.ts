@@ -14,7 +14,6 @@ export interface Interface {
   readonly run: (request: ClaudeSessions.Request, configDirs: readonly string[]) => Effect.Effect<void, Error>
 }
 
-// Web searches run on this account too.
 export const LAST = "last-account"
 
 export function make(input: { readonly sessions: ClaudeSessions.Interface; readonly storage: Storage }) {

@@ -8,7 +8,7 @@ import { ClaudeQueryOptions } from "../claude/query-options.js"
 import { ClaudeWebSearch } from "../claude/websearch.js"
 import { ClaudeProvider } from "./provider.js"
 
-// Offered only while Claude Agent is connected, and never made the default: users pick it in their config
+// Never made the default: users pick it in their config
 export const register = Effect.fn("ClaudeWebSearchProvider.register")(function* (ctx: Context, io: ClaudeIO.Interface) {
   const state = { connected: (yield* ctx.integration.connection.active(ClaudeProvider.ID)) !== undefined }
 
@@ -35,7 +35,7 @@ const search = Effect.fn("ClaudeWebSearchProvider.search")(function* (
   query: string,
 ) {
   const executable = io.which()
-  if (!executable) return yield* Effect.fail(new Error("Claude Code is not installed"))
+  if (!executable) return yield* Effect.fail(new Error("Install Claude Code and run `claude auth login` first"))
   const provider = Option.getOrUndefined(yield* ctx.provider.get({ providerID: ClaudeProvider.ID }).pipe(Effect.option))
   const connection = ClaudeQueryOptions.connectionEnv({
     settings: provider?.data.settings,
