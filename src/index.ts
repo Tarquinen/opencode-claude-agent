@@ -8,6 +8,7 @@ import { ClaudeIntegration } from "./plugin/integration.js"
 import { ClaudeInstructions } from "./plugin/instructions.js"
 import { ClaudeProvider } from "./plugin/provider.js"
 import { ClaudeSessionHooks } from "./plugin/session.js"
+import { ClaudeWebSearchProvider } from "./plugin/websearch.js"
 
 export const ID = "opencode.claude-agent"
 
@@ -34,6 +35,7 @@ export const make = (io: ClaudeIO.Interface, registry = ClaudeSessions.registry(
       yield* ClaudeAISDK.register(ctx, sessions)
       yield* ClaudeSessionHooks.register(ctx)
       yield* ClaudeInstructions.register(ctx)
+      yield* ClaudeWebSearchProvider.register(ctx, io)
     }),
   })
 

@@ -14,7 +14,8 @@ export interface Interface {
   readonly run: (request: ClaudeSessions.Request, configDirs: readonly string[]) => Effect.Effect<void, Error>
 }
 
-const LAST = "last-account"
+// The account chats used last. Web searches start on it too.
+export const LAST = "last-account"
 
 export function make(input: { readonly sessions: ClaudeSessions.Interface; readonly storage: Storage }) {
   const read = Effect.fn("ClaudeAccounts.read")(function* (key: string) {

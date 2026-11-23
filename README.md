@@ -81,3 +81,19 @@ If you have several interchangeable accounts, OpenCode can move chats between th
      }
    }
    ```
+
+## Search the web with your Claude plan
+
+The plugin can serve opencode's `websearch` tool with Claude Code's WebSearch, so searches count toward your Claude plan instead of needing a search API key. It works for every model, not just Claude. Turn it on in your `opencode.json`:
+
+```json
+{ "websearch": { "provider": "claude-agent" } }
+```
+
+The provider is offered only while Claude Agent is connected, and searches use the same login, account folders and connection settings as chats.
+
+WebSearch returns page contents encrypted, so a Claude model has to run each search. It writes a short summary of the results, which comes back with the links. That model is Haiku by default, the cheapest. To choose another, set `webSearchModel`:
+
+```json
+{ "providers": { "claude-agent": { "settings": { "webSearchModel": "sonnet" } } } }
+```

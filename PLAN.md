@@ -231,7 +231,7 @@ Claude Code has its own copy of many opencode features. If both run, Claude sees
 | Permissions | opencode asks inside the tool | `permissionMode: "dontAsk"`, `allowedTools: ["mcp__opencode__*"]` |
 | Compaction, including idle compaction (summarises a long conversation after about an hour idle, just before the cache expires) | opencode's | env `DISABLE_AUTO_COMPACT=1`, which turns off both |
 | Session recap ("while you were away" summary) | none | env `CLAUDE_CODE_ENABLE_AWAY_SUMMARY=0` |
-| Web search, todos, plan mode, questions, subagents | opencode's tools and agents (`question`, the `plan` agent, `task`, websearch) | `tools: []` |
+| Web search, todos, plan mode, questions, subagents | opencode's tools and agents (`question`, the `plan` agent, `task`, websearch) | `tools: []`. The optional web search provider runs Claude Code's WebSearch in its own one-off process, behind opencode's `websearch` tool |
 | Tool search (hides tool schemas until searched) | none | env `ENABLE_TOOL_SEARCH=false` |
 | Advisor tool (asks a larger model for advice) | none | env `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` |
 
@@ -291,7 +291,7 @@ Most hooks work unchanged, because opencode still builds every request, runs eve
 | `aisdk.hook("sdk")`, `"language"` | Yes | We use the `sdk` hook. Another plugin hooking our provider could replace our model. |
 | `provider.transform`, `model.transform` | Yes | We use `provider.transform`. Model transforms can hide or edit our models as usual. |
 | `agent.transform` | Partly | Models, permissions and step limits work. Built-in agent prompts are replaced by the Claude Code preset; custom roles are appended. Most generation settings, such as temperature, are ignored (see "Incompatible features"). |
-| `command`, `mcp`, `skill`, `reference`, `websearch`, `vcs` and `integration` transforms | Yes | These become text, tools or prompt content before the model sees them. MCP tools reach Claude as opencode tools, and opencode handles MCP requests for user input. We use `integration.transform` for the login method. |
+| `command`, `mcp`, `skill`, `reference`, `websearch`, `vcs` and `integration` transforms | Yes | These become text, tools or prompt content before the model sees them. MCP tools reach Claude as opencode tools, and opencode handles MCP requests for user input. We use `integration.transform` for the login method, and `websearch.transform` for the optional web search provider. |
 
 Everything else on the plugin context (`event`, `storage`, `rpc`, `worktree`, `credential`, `generate`, `experimental.terminal` and the `session` calls) doesn't touch the model call and works as usual.
 
@@ -352,6 +352,7 @@ plugin-claude-agent/
 │   │   ├── integration.ts  ctx.integration: the `claude auth login` method and its connection status
 │   │   ├── aisdk.ts        ctx.aisdk: hands opencode our model
 │   │   ├── instructions.ts ctx.session / ctx.agent: resolved roles for conversation requests
+│   │   ├── websearch.ts    ctx.websearch: the Claude web search provider while Claude Agent is connected
 │   │   └── session.ts      ctx.session: tags request kinds, clears the automatic output budget, keeps tool error status, stops opencode's retries
 │   │
 │   ├── claude/             The only code that starts or talks to Claude Code
@@ -361,7 +362,8 @@ plugin-claude-agent/
 │   │   ├── status.ts       The login check's latest result, shared by every feature
 │   │   ├── session.ts      One Claude process: input queue, single reader, reading up to a tool step, interrupt, drain, close
 │   │   ├── sessions.ts     Session registry: serialization, resume/restart, idle shutdown, reload handover, side-call cleanup
-│   │   └── probe.ts        Login check, version check, model list and context sizes
+│   │   ├── probe.ts        Login check, version check, model list and context sizes
+│   │   └── websearch.ts    One-off WebSearch run, its results and de-duplicated links
 │   │
 │   ├── language-model/     The AI SDK model, laid out like opencode's github-copilot/
 │   │   ├── claude-agent-language-model.ts  doStream: select chat or side-call prompt, run the request, stream back
@@ -490,6 +492,7 @@ Verify any proposed explanation with a focused reproduction using documented API
 4. **Tools.** The MCP tool bridge: parked handlers, `PreToolUse` matching, names and descriptions, errors, failing closed, output limits, media in results and tool guidance in the append. See [Manual TUI acceptance](TESTING.md#manual-tui-acceptance).
 5. **Undo, fork, compaction and generate.** Branching with `forkSession`, with compaction and generate on throwaway branches. See [Phase 5](TESTING.md#phase-5-branching).
 6. **Side calls and polish.** Agent roles and instruction files in the append, live model and effort controls, the output budget, max steps, plan-limit, billing and server errors, and `claude.exe` on Windows. See [Phase 6](TESTING.md#phase-6-instructions-controls-and-errors).
+7. **Web search provider.** Claude Code's WebSearch behind opencode's `websearch` tool for every model: a one-off process with only WebSearch, stopped once results arrive, with the chats' account rotation and connection settings.
 
 Not verified: the Windows executable lookup has not been run on Windows. OpenCode 2.0.32's TUI shows only a generic "Sign in required" for a sign-in problem, not its message.
 
