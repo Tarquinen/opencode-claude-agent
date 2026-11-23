@@ -18,7 +18,10 @@ describe("opencode web search", () => {
   it.live("offers Claude's search only while connected, and runs it in a claude with no other tool", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make([FakeClaude.expectTurn({ recording: "websearch" })], { probes: true })
-      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }) })
+      const test = yield* TestOpenCode.start({
+        io: FakeIO.make({ claude }),
+        config: { providers: { "claude-agent": { settings: { baseURL: "https://gateway.example" } } } },
+      })
       expect(yield* offered(test.opencode)).toBe(false)
 
       yield* TestOpenCode.connect(test.opencode)
@@ -29,6 +32,8 @@ describe("opencode web search", () => {
       expect(found.data.results.length).toBeGreaterThan(1)
       const search = claude.runs.find((run) => run.args.includes("--tools=WebSearch"))
       expect(search?.args).toContain("--no-session-persistence")
+      // Searches go through the same connection as chats
+      expect(search?.env.ANTHROPIC_BASE_URL).toBe("https://gateway.example")
 
       for (const credential of yield* test.opencode.credential.list()) {
         yield* test.opencode.credential.remove({ credentialID: credential.id })
@@ -77,6 +82,7 @@ describe("opencode web search", () => {
       yield* test.opencode.websearch.query({ query: "Node.js release schedule", providerID })
       const search = claude.runs.find((run) => run.args.includes("--tools=WebSearch"))
       expect(search?.env.CLAUDE_CONFIG_DIR).toBe(path.join(os.homedir(), ".claude-a"))
+      claude.check()
     }),
   )
 })
