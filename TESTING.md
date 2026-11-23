@@ -339,7 +339,7 @@ Many of these come from bugs OpenChamber hit (its `test/*-regression.ts` files a
 | A "successful" result after server errors (`api_error_status`) becomes an error without outer retries | 1, 3 | 6 |
 | Plan-limit events: "rejected" vs "allowed", weekly reset dates and a single visible terminal error | 1, 3 | 6 |
 | An API-key login is not a sign-in problem, and its models work | 3 | 6 |
-| Web search returns each page once under its plainest URL, with Claude's summary on the first result; failed searches throw; a live search returns links | 1, 4 | 7 |
+| Web search is offered only while connected and runs in a `claude` with only WebSearch; each page is listed once, with Claude's summary on the first result | 1, 2, 4 | 7 |
 
 ## Folder layout
 

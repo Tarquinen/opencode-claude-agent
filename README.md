@@ -90,10 +90,6 @@ The plugin can serve opencode's `websearch` tool with Claude Code's WebSearch, s
 { "websearch": { "provider": "claude-agent" } }
 ```
 
-The provider is offered only while Claude Agent is connected, and searches use the same login, account folders and connection settings as chats.
+The provider is offered only while Claude Agent is connected. Searches use the same login and connection settings as chats, on the account your chats used last.
 
-WebSearch returns page contents encrypted, so a Claude model has to run each search. It writes a short summary of the results, which comes back with the links. That model is Haiku by default, the cheapest. To choose another, set `webSearchModel`:
-
-```json
-{ "providers": { "claude-agent": { "settings": { "webSearchModel": "sonnet" } } } }
-```
+WebSearch returns page contents encrypted, so a Claude model has to run each search. Haiku does, the cheapest, and its short summary of the results comes back with the links.
