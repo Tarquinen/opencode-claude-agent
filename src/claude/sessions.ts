@@ -68,6 +68,8 @@ export interface Interface {
   readonly run: (request: Request) => Effect.Effect<void, Error>
   // OpenCode stopped running the session, so a turn still waiting for tool results will not get them.
   readonly idle: (sessionID: string) => Effect.Effect<void>
+  // Stops the session's process now. Its saved Claude session stays, so the next request resumes it.
+  readonly retire: (sessionID: string) => Effect.Effect<void>
 }
 
 const launch = (request: Request) =>
@@ -492,7 +494,13 @@ export function registry() {
       yield* armIdle(entry)
     })
 
-    return { run, idle } satisfies Interface
+    const retire = Effect.fn("ClaudeSessions.retire")(function* (sessionID: string) {
+      const entry = entries.get(sessionID)
+      if (!entry) return
+      yield* entry.lock.withPermit(stop(entry)).pipe(Effect.catch((error) => Effect.logWarning(error)))
+    })
+
+    return { run, idle, retire } satisfies Interface
   })
 
   return { attach, close }
