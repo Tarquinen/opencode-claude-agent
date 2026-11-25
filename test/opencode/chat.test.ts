@@ -187,6 +187,46 @@ describe("embedded text chat", () => {
     15_000,
   )
 
+  it.live("a subagent's process stops once it goes idle, and a later message resumes its Claude session", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make(
+        [
+          FakeClaude.expectStartup(),
+          FakeClaude.expectTurn(),
+          FakeClaude.expectInterrupt(),
+          FakeClaude.expectStartup(),
+          FakeClaude.expectTurn({ recording: "text-resume" }),
+          FakeClaude.expectInterrupt(),
+        ],
+        { probes: true },
+      )
+      const registry = ClaudeSessions.registry()
+      yield* Effect.addFinalizer(() => registry.close())
+      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), registry })
+      yield* TestOpenCode.connect(test.opencode)
+      const model = Model.Ref.make({ providerID: ClaudeProvider.ID, id: Model.ID.make("haiku") })
+      const parent = yield* test.opencode.session.create({
+        title: "Parent",
+        location: { directory: Location.PublicRef.fields.directory.make(test.directory) },
+        model,
+      })
+      const child = yield* test.opencode.sessions.create({ parentID: parent.id, model })
+      yield* test.opencode.session.prompt({ sessionID: child.id, text: "Remember COPPER-OTTER." })
+      yield* test.opencode.session.wait({ sessionID: child.id })
+      const calls = () => claude.runs.filter((run) => run.args.includes("--include-partial-messages"))
+      const first = calls()[0]!
+      // The idle timeout is minutes away, so only the idle hook can have stopped it.
+      yield* Effect.promise(() => first.closed)
+      const id = first.args.find((arg) => arg.startsWith("--session-id="))!.split("=")[1]
+      yield* test.opencode.session.prompt({ sessionID: child.id, text: "What marker did I give you earlier?" })
+      yield* test.opencode.session.wait({ sessionID: child.id })
+      expect(calls()).toHaveLength(2)
+      expect(calls()[1]!.args).toContain(`--resume=${id}`)
+      yield* Effect.promise(() => calls()[1]!.closed)
+      claude.check()
+    }),
+  )
+
   for (const cap of [undefined, 4096])
     it.live(`preserves ${cap === undefined ? "inherited output defaults" : "explicit output overrides"}`, () =>
       Effect.gen(function* () {
