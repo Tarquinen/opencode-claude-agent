@@ -168,7 +168,7 @@ A fingerprint covers what the model can see: each message's role, its text, atta
 
 A run of back-to-back user messages is compared as a group, ignoring their order. opencode can add notes, such as Plan mode reminders, just before the latest user message (`packages/core/src/plugin/plan.ts:55-72`), and they don't always end up in the same spot.
 
-Images from tool results arrive as a separate user message right after the result (`aisdk.ts:522-536`). The plugin counts that message as part of the tool result, not as new user input, and a catch-up shows it under a `<tool>` tag instead of `<user>`.
+Images from tool results arrive as a separate user message right after the result (`aisdk.ts:522-536`). The plugin counts that message as part of the tool result, not as new user input.
 
 A few rare things change earlier messages: images trimmed once a session passes 25 MB (`model-request.ts:132-215`) and the max-steps note, which is only sent once (`packages/core/src/session/runner/llm.ts:226-244`). These show up as changed history and are handled like any other edit. After stream cancellation, the saved checkpoints end at the submitted input. Claude's drained transcript owns the partial reply, so the next request skips OpenCode's copy of that reply and continues the same native session, even when OpenCode saved no text or lowered interrupted thinking as text. Earlier history still has to match.
 
