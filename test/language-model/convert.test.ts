@@ -118,4 +118,35 @@ describe("Claude conversions", () => {
       { type: "text", text: "</user>" },
     ])
   })
+
+  test("file names reach Claude as a document title, or as a line before an image sent now", () => {
+    const image = { type: "file" as const, mediaType: "image/png", data: "AQID", filename: "chart.png" }
+    const pdf = { type: "file" as const, mediaType: "application/pdf", data: "cGRm", filename: "report.pdf" }
+    const block: ConvertToClaudeMessage.ContentBlock = {
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: "AQID" },
+    }
+    const blocks = ConvertToClaudeMessage.content([
+      { role: "user", content: [image] },
+      { role: "assistant", content: [{ type: "text", text: "Seen" }] },
+      { role: "user", content: [image, pdf] },
+    ])
+    expect(blocks).toEqual([
+      { type: "text", text: "<user>" },
+      { type: "document", source: { type: "content", content: [block] }, title: "chart.png" },
+      { type: "text", text: "</user>" },
+      { type: "text", text: "<assistant>" },
+      { type: "text", text: "Seen" },
+      { type: "text", text: "</assistant>" },
+      { type: "text", text: "<user>" },
+      { type: "text", text: "Attached image: chart.png" },
+      block,
+      {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: "cGRm" },
+        title: "report.pdf",
+      },
+      { type: "text", text: "</user>" },
+    ])
+  })
 })
