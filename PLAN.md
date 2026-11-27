@@ -147,7 +147,9 @@ Claude can't be given real past turns. Instead, the turns Claude missed go at th
 
 Reading the catch-up costs the same as a normal model switch in opencode: the new model reads the history once without a cache, and it is cached after that.
 
-The catch-up is one user message wrapped in a tag, in the style of opencode's `<conversation-checkpoint>` (`to-llm-message.ts:306-324`). Text, tool calls and tool results are tagged text. Images and PDFs are image and document blocks in the same message.
+The catch-up is one user message wrapped in a tag, in the style of opencode's `<conversation-checkpoint>` (`to-llm-message.ts:306-324`). Text, tool calls and tool results are tagged text. PDFs are document blocks in the same message.
+
+Images from earlier turns are also there, but each one is wrapped in a document block (`source: { type: "content", content: [image] }`). Claude Code treats a bare image block in a user message as one the user just pasted: it saves a copy to disk and adds an `[Image: source: …]` line after the new prompt, so Claude takes an old tool screenshot for a new attachment (opencode issue 62085). A wrapped image reaches Claude as it is, and Claude still sees it. Images in the message being sent now stay bare image blocks. This works because Claude Code's input code only treats top-level `image` blocks as pastes and passes every other block through; that is how 2.1.326 behaves (checked in its code and in the requests it sends), not a documented promise. Claude Code does not resize a wrapped image, but opencode has already resized every image to 2000×2000 and 5 MB before a provider sees it (`packages/core/src/image.ts`), so the token count comes out the same (a 1080×2400 screenshot: 3,905 tokens bare, 3,837 wrapped). An image the API rejects that got past that (for example 9000×400) is dropped with an error note instead of being resized.
 
 ### The record
 
@@ -162,7 +164,7 @@ A fingerprint covers what the model can see: each message's role, its text, atta
 
 A run of back-to-back user messages is compared as a group, ignoring their order. opencode can add notes, such as Plan mode reminders, just before the latest user message (`packages/core/src/plugin/plan.ts:55-72`), and they don't always end up in the same spot.
 
-Images from tool results arrive as a separate user message right after the result (`aisdk.ts:522-536`). The plugin counts that message as part of the tool result, not as new user input.
+Images from tool results arrive as a separate user message right after the result (`aisdk.ts:522-536`). The plugin counts that message as part of the tool result, not as new user input, and a catch-up shows it under a `<tool>` tag instead of `<user>`.
 
 A few rare things change earlier messages: images trimmed once a session passes 25 MB (`model-request.ts:132-215`) and the max-steps note, which is only sent once (`packages/core/src/session/runner/llm.ts:226-244`). These show up as changed history and are handled like any other edit. After stream cancellation, the saved checkpoints end at the submitted input. Claude's drained transcript owns the partial reply, so the next request skips OpenCode's copy of that reply and continues the same native session, even when OpenCode saved no text or lowered interrupted thinking as text. Earlier history still has to match.
 
