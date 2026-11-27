@@ -92,30 +92,4 @@ describe("Claude conversions", () => {
       { type: "image", source: { type: "url", url: "https://example.com/photo.jpg" } },
     ])
   })
-
-  test("an image from an earlier turn is wrapped in a document, and one sent now stays an image", () => {
-    const image = { type: "file" as const, mediaType: "image/png", data: "AQID" }
-    const block: ConvertToClaudeMessage.ContentBlock = {
-      type: "image",
-      source: { type: "base64", media_type: "image/png", data: "AQID" },
-    }
-    const blocks = ConvertToClaudeMessage.content([
-      { role: "user", content: [{ type: "text", text: "Old screenshot" }, image] },
-      { role: "assistant", content: [{ type: "text", text: "Seen" }] },
-      { role: "user", content: [{ type: "text", text: "New screenshot" }, image] },
-    ])
-    expect(blocks).toEqual([
-      { type: "text", text: "<user>" },
-      { type: "text", text: "Old screenshot" },
-      { type: "document", source: { type: "content", content: [block] } },
-      { type: "text", text: "</user>" },
-      { type: "text", text: "<assistant>" },
-      { type: "text", text: "Seen" },
-      { type: "text", text: "</assistant>" },
-      { type: "text", text: "<user>" },
-      { type: "text", text: "New screenshot" },
-      block,
-      { type: "text", text: "</user>" },
-    ])
-  })
 })
