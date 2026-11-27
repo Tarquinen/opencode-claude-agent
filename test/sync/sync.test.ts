@@ -210,19 +210,24 @@ describe("history reconciliation", () => {
         role: "user",
         content: [
           { type: "text", text: "Attached media from tool result:" },
-          { type: "file", mediaType: "image/png", data: "AQI=" },
+          { type: "file", mediaType: "image/png", data: "AQI=", filename: "swatch.png" },
           { type: "file", mediaType: "application/pdf", data: "AwQ=" },
         ],
       },
-      user("Continue"),
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Continue" },
+          { type: "file", mediaType: "image/png", data: "BQY=" },
+        ],
+      },
     ])
     expect(JSON.stringify(blocks)).toContain("marker.txt")
     expect(JSON.stringify(blocks)).toContain("LEMON-IBIS")
     expect(JSON.stringify(blocks)).not.toContain("PRIVATE")
-    expect(blocks.at(-1)).toEqual({ type: "text", text: "Continue" })
-    // The files sit under the tool that returned them, inside the checkpoint, and the image is not a bare image block.
-    const marker = blocks.findIndex((block) => block.type === "text" && block.text.startsWith("Attached media"))
-    expect(blocks.slice(marker - 1, marker + 4)).toEqual([
+    // Files from earlier turns sit under the tool that returned them, and the image is wrapped in a document so Claude
+    // Code does not take it for a new paste. An image sent now stays an image.
+    expect(blocks.slice(-8)).toEqual([
       { type: "text", text: "<tool>" },
       { type: "text", text: "Attached media from tool result:" },
       {
@@ -231,11 +236,13 @@ describe("history reconciliation", () => {
           type: "content",
           content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AQI=" } }],
         },
+        title: "swatch.png",
       },
       { type: "document", source: { type: "base64", media_type: "application/pdf", data: "AwQ=" } },
       { type: "text", text: "</tool>" },
+      { type: "text", text: "</conversation-checkpoint>" },
+      { type: "text", text: "Continue" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "BQY=" } },
     ])
-    expect(blocks[marker + 4]).toEqual({ type: "text", text: "</conversation-checkpoint>" })
-    expect(blocks.some((block) => block.type === "image")).toBe(false)
   })
 })

@@ -79,74 +79,23 @@ describe("Claude conversions", () => {
         role: "user",
         content: [
           { type: "text", text: "/compact @README.md are literal text" },
-          { type: "file", mediaType: "image/png", data: bytes },
-          { type: "file", mediaType: "application/pdf", data: "cGRm" },
+          { type: "file", mediaType: "image/png", data: bytes, filename: "chart.png" },
+          { type: "file", mediaType: "application/pdf", data: "cGRm", filename: "report.pdf" },
           { type: "file", mediaType: "image/jpeg", data: new URL("https://example.com/photo.jpg") },
         ],
       },
     ])
     expect(blocks).toEqual([
       { type: "text", text: "/compact @README.md are literal text" },
-      { type: "image", source: { type: "base64", media_type: "image/png", data: "AQID" } },
-      { type: "document", source: { type: "base64", media_type: "application/pdf", data: "cGRm" } },
-      { type: "image", source: { type: "url", url: "https://example.com/photo.jpg" } },
-    ])
-  })
-
-  test("an image from an earlier turn is wrapped in a document, and one sent now stays an image", () => {
-    const image = { type: "file" as const, mediaType: "image/png", data: "AQID" }
-    const block: ConvertToClaudeMessage.ContentBlock = {
-      type: "image",
-      source: { type: "base64", media_type: "image/png", data: "AQID" },
-    }
-    const blocks = ConvertToClaudeMessage.content([
-      { role: "user", content: [{ type: "text", text: "Old screenshot" }, image] },
-      { role: "assistant", content: [{ type: "text", text: "Seen" }] },
-      { role: "user", content: [{ type: "text", text: "New screenshot" }, image] },
-    ])
-    expect(blocks).toEqual([
-      { type: "text", text: "<user>" },
-      { type: "text", text: "Old screenshot" },
-      { type: "document", source: { type: "content", content: [block] } },
-      { type: "text", text: "</user>" },
-      { type: "text", text: "<assistant>" },
-      { type: "text", text: "Seen" },
-      { type: "text", text: "</assistant>" },
-      { type: "text", text: "<user>" },
-      { type: "text", text: "New screenshot" },
-      block,
-      { type: "text", text: "</user>" },
-    ])
-  })
-
-  test("file names reach Claude as a document title, or as a line before an image sent now", () => {
-    const image = { type: "file" as const, mediaType: "image/png", data: "AQID", filename: "chart.png" }
-    const pdf = { type: "file" as const, mediaType: "application/pdf", data: "cGRm", filename: "report.pdf" }
-    const block: ConvertToClaudeMessage.ContentBlock = {
-      type: "image",
-      source: { type: "base64", media_type: "image/png", data: "AQID" },
-    }
-    const blocks = ConvertToClaudeMessage.content([
-      { role: "user", content: [image] },
-      { role: "assistant", content: [{ type: "text", text: "Seen" }] },
-      { role: "user", content: [image, pdf] },
-    ])
-    expect(blocks).toEqual([
-      { type: "text", text: "<user>" },
-      { type: "document", source: { type: "content", content: [block] }, title: "chart.png" },
-      { type: "text", text: "</user>" },
-      { type: "text", text: "<assistant>" },
-      { type: "text", text: "Seen" },
-      { type: "text", text: "</assistant>" },
-      { type: "text", text: "<user>" },
+      // An image block has no field for a name, so the name goes in a line before it.
       { type: "text", text: "Attached image: chart.png" },
-      block,
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "AQID" } },
       {
         type: "document",
         source: { type: "base64", media_type: "application/pdf", data: "cGRm" },
         title: "report.pdf",
       },
-      { type: "text", text: "</user>" },
+      { type: "image", source: { type: "url", url: "https://example.com/photo.jpg" } },
     ])
   })
 })
