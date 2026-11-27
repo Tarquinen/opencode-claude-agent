@@ -97,18 +97,6 @@ describe.skipIf(!live)("history sync against real Claude", () => {
         expect(yield* Effect.promise(() => ClaudeIO.real.sessionExists(original))).toBe(true)
         yield* Effect.promise(() => deleteSession(original, { dir: directory }))
         storage.ids.delete(original)
-        const invalid: LanguageModelV3Prompt = [
-          ...history,
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Inspect this image" },
-              { type: "file", mediaType: "image/svg+xml", data: "PHN2Zy8+" },
-            ],
-          },
-        ]
-        const error = yield* TestSessions.reply(model, invalid).pipe(Effect.flip)
-        expect(String(error.cause)).toContain("Claude Code does not support image/svg+xml attachments")
         const rebuilt = yield* ask("Repeat those three markers. Output only the markers.")
         for (const marker of ["LILAC-HERON", "COPPER-OTTER", "LEMON-IBIS"]) expect(rebuilt).toContain(marker)
         expect((yield* records.get("session-a"))!.claudeSessionID).not.toBe(original)

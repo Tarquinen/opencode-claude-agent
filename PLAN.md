@@ -153,6 +153,8 @@ Images from earlier turns are also there, but each one is wrapped in a document 
 
 File names are passed on. A document block carries the name as its `title`, which covers PDFs and wrapped images. An image block has no field for it, so an image sent now gets an `Attached image: <name>` text line before it; without it Claude knows the image only as Claude Code's `1.png`.
 
+A file that is not a PNG, JPEG, GIF, WebP or PDF becomes a text note, `[data.csv (text/csv) was left out: Claude Code cannot read this file type.]`. OpenCode filters what a user attaches, so these only come from tools. Failing instead would break the session on Claude: the file stays in OpenCode's history, so every later turn would fail on it too.
+
 ### The record
 
 For each opencode session, plugin storage keeps:
