@@ -82,4 +82,23 @@ describe("tool bridge conversion", () => {
     expect(image.mcp.content).toEqual([{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }])
     expect(image.replacement).toBeUndefined()
   })
+
+  test("a file type Claude cannot read becomes a note instead of failing the turn", () => {
+    const result = ToolResult.convert(
+      {
+        type: "content",
+        value: [
+          { type: "text", text: "Fetched data.csv." },
+          { type: "file-data", mediaType: "text/csv", data: "YSxi", filename: "data.csv" },
+        ],
+      },
+      [{ type: "file", mediaType: "image/bmp", data: "Qk0=" }],
+    )
+    expect(result.mcp.content).toEqual([
+      { type: "text", text: "Fetched data.csv." },
+      { type: "text", text: "[data.csv (text/csv) was left out: Claude Code cannot read this file type.]" },
+      { type: "text", text: "[image/bmp was left out: Claude Code cannot read this file type.]" },
+    ])
+    expect(result.replacement).toBeUndefined()
+  })
 })
