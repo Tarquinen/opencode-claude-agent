@@ -210,7 +210,7 @@ describe("history reconciliation", () => {
         role: "user",
         content: [
           { type: "text", text: "Attached media from tool result:" },
-          { type: "file", mediaType: "image/png", data: "AQI=" },
+          { type: "file", mediaType: "image/png", data: "AQI=", filename: "swatch.png" },
           { type: "file", mediaType: "application/pdf", data: "AwQ=" },
         ],
       },
@@ -234,6 +234,7 @@ describe("history reconciliation", () => {
           type: "content",
           content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AQI=" } }],
         },
+        title: "swatch.png",
       },
       { type: "document", source: { type: "base64", media_type: "application/pdf", data: "AwQ=" } },
       { type: "text", text: "</tool>" },

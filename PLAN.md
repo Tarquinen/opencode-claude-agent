@@ -151,6 +151,8 @@ The catch-up is one user message wrapped in a tag, in the style of opencode's `<
 
 Images from earlier turns are also there, but each one is wrapped in a document block (`source: { type: "content", content: [image] }`). Claude Code treats a bare image block in a user message as one the user just pasted: it saves a copy to disk and adds an `[Image: source: …]` line after the new prompt, so Claude takes an old tool screenshot for a new attachment (opencode issue 62085). A wrapped image reaches Claude as it is, and Claude still sees it. Images in the message being sent now stay bare image blocks. This works because Claude Code's input code only treats top-level `image` blocks as pastes and passes every other block through; that is how 2.1.326 behaves (checked in its code and in the requests it sends), not a documented promise. Claude Code does not resize a wrapped image, but opencode has already resized every image to 2000×2000 and 5 MB before a provider sees it (`packages/core/src/image.ts`), so the token count comes out the same (a 1080×2400 screenshot: 3,905 tokens bare, 3,837 wrapped). An image the API rejects that got past that (for example 9000×400) is dropped with an error note instead of being resized.
 
+File names are passed on. A document block carries the name as its `title`, which covers PDFs and wrapped images. An image block has no field for it, so an image sent now gets an `Attached image: <name>` text line before it; without it Claude knows the image only as Claude Code's `1.png`.
+
 ### The record
 
 For each opencode session, plugin storage keeps:
